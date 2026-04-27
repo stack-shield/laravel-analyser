@@ -1,0 +1,50 @@
+{
+    "name": "stackshield/scanner",
+    "description": "A security scanner that understands Laravel. Static analysis for Laravel applications.",
+    "keywords": ["laravel", "security", "sast", "scanner", "static-analysis"],
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        {
+            "name": "Stackshield",
+            "email": "hello@stackshield.io"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "nikic/php-parser": "^5.0",
+        "symfony/yaml": "^6.0|^7.0",
+        "illuminate/support": "^10.0|^11.0|^12.0",
+        "illuminate/console": "^10.0|^11.0|^12.0",
+        "illuminate/filesystem": "^10.0|^11.0|^12.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0|^10.0",
+        "pestphp/pest": "^2.0|^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Stackshield\\Scanner\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Stackshield\\Scanner\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Stackshield\\Scanner\\ScannerServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
+}

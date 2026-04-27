@@ -1,0 +1,18 @@
+# Stackshield Scanner Configuration
+# https://stackshield.io/methodology
+
+# Override check settings
+# checks:
+#   SS001: { severity: critical }
+#   SS006: { enabled: false }
+
+# Paths to include/exclude
+# paths:
+#   include: [app, routes, config, bootstrap, database/seeders]
+#   exclude: [tests, database/migrations, storage]
+
+# Minimum severity to fail the scan (info|low|medium|high|critical)
+# fail_on: high
+
+# Baseline file path
+# baseline: stackshield-baseline.yaml
