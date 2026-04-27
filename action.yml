@@ -1,0 +1,45 @@
+name: 'Stackshield Scan'
+description: 'Run Stackshield security scanner on your Laravel project'
+author: 'Stackshield'
+branding:
+  icon: 'shield'
+  color: 'green'
+
+inputs:
+  php-version:
+    description: 'PHP version to use'
+    required: false
+    default: '8.3'
+  format:
+    description: 'Output format (console, json, sarif, markdown)'
+    required: false
+    default: 'sarif'
+  fail-on:
+    description: 'Minimum severity to fail on (info, low, medium, high, critical)'
+    required: false
+    default: 'high'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ inputs.php-version }}
+
+    - name: Install dependencies
+      shell: bash
+      run: composer install --prefer-dist --no-progress
+
+    - name: Install Stackshield Scanner
+      shell: bash
+      run: composer require --dev stackshield/scanner --no-interaction
+
+    - name: Run scan
+      shell: bash
+      run: php artisan stackshield:scan --format=${{ inputs.format }} --fail-on=${{ inputs.fail-on }} --output=stackshield-results.${{ inputs.format == 'sarif' && 'sarif' || inputs.format == 'json' && 'json' || 'txt' }}
+
+    - name: Upload SARIF
+      if: ${{ inputs.format == 'sarif' && always() }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: stackshield-results.sarif

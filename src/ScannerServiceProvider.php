@@ -5,6 +5,7 @@ namespace Stackshield\Scanner;
 use Illuminate\Support\ServiceProvider;
 use Stackshield\Scanner\Commands\BaselineCommand;
 use Stackshield\Scanner\Commands\ChecksCommand;
+use Stackshield\Scanner\Commands\FixCommand;
 use Stackshield\Scanner\Commands\ReportCommand;
 use Stackshield\Scanner\Commands\ScanCommand;
 use Symfony\Component\Yaml\Yaml;
@@ -30,6 +31,7 @@ class ScannerServiceProvider extends ServiceProvider
                 BaselineCommand::class,
                 ChecksCommand::class,
                 ReportCommand::class,
+                FixCommand::class,
             ]);
         }
     }
@@ -47,18 +49,32 @@ class ScannerServiceProvider extends ServiceProvider
     private function registerDefaultChecks(Scanner $scanner, array $config): void
     {
         $checks = [
-            new Checks\Config\DebugModeCheck,
-            new Checks\Config\AppKeyCheck,
-            new Checks\Config\DevToolsProductionCheck,
-            new Checks\Config\SessionCookieCheck,
-            new Checks\Code\MassAssignmentCheck,
-            new Checks\Filesystem\ExposedFilesCheck,
-            new Checks\Filesystem\StorageSymlinkCheck,
-            new Checks\Routes\AuthThrottleCheck,
-            new Checks\Routes\RouteModelBindingAuthCheck,
-            new Checks\Routes\CsrfExemptionCheck,
-            new Checks\Code\RawSqlCheck,
-            new Checks\Code\DangerousSinksCheck,
+            // Code checks
+            new Checks\Code\MassAssignmentCheck,          // SS001
+            new Checks\Code\RawSqlCheck,                  // SS002
+            new Checks\Code\DangerousSinksCheck,          // SS003
+            new Checks\Code\UnvalidatedInputCheck,        // SS007
+            new Checks\Code\HardcodedCredentialsCheck,    // SS008
+            new Checks\Code\FileUploadCheck,              // SS009
+            // Config checks
+            new Checks\Config\AppKeyCheck,                // SS010
+            new Checks\Config\EncryptionConfigCheck,      // SS011
+            new Checks\Config\DebugModeCheck,             // SS012
+            new Checks\Config\DevToolsProductionCheck,    // SS013
+            new Checks\Config\LogChannelCheck,            // SS014
+            new Checks\Config\SessionCookieCheck,         // SS015
+            new Checks\Config\CorsConfigCheck,            // SS016
+            new Checks\Config\MailConfigCheck,            // SS017
+            // Route checks
+            new Checks\Routes\AuthThrottleCheck,          // SS004
+            new Checks\Routes\RouteModelBindingAuthCheck, // SS005
+            new Checks\Routes\CsrfExemptionCheck,        // SS006
+            // Filesystem checks
+            new Checks\Filesystem\ExposedFilesCheck,      // SS020
+            new Checks\Filesystem\StorageSymlinkCheck,    // SS021
+            new Checks\Filesystem\PermissionsCheck,       // SS022
+            // Dependency checks
+            new Checks\Dependencies\KnownAdvisoriesCheck, // SS030
         ];
 
         $scanner->registerChecks($checks);

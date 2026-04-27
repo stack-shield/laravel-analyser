@@ -1,0 +1,39 @@
+name: Stackshield Scan
+description: Run Stackshield security scanner on a Laravel project
+
+on:
+  workflow_call:
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-suggest
+
+      - name: Install Stackshield Scanner
+        run: composer require --dev stackshield/scanner --no-interaction
+
+      - name: Run Stackshield scan
+        run: php artisan stackshield:scan --format=sarif --output=results.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+
+      - name: Console report
+        run: php artisan stackshield:scan
+        if: always()
