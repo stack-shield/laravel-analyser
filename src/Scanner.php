@@ -8,7 +8,7 @@ use StackShield\Analyser\Checks\Check;
 
 final class Scanner
 {
-    public const VERSION = '0.1.0';
+    public const VERSION = '0.2.0';
 
     /** @var Check[] */
     private array $checks = [];
