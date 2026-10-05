@@ -4,15 +4,19 @@ namespace StackShield\Analyser\Checks\Code;
 
 use PhpParser\Node;
 use PhpParser\NodeFinder;
-use StackShield\Analyser\Checks\Advisory;
 use StackShield\Analyser\Checks\Check;
 use StackShield\Analyser\Context;
 use StackShield\Analyser\Enums\Category;
 use StackShield\Analyser\Enums\Severity;
 use StackShield\Analyser\Finding;
 
-class FileUploadCheck implements Advisory, Check
+class FileUploadCheck implements Check
 {
+    private const STORE_METHODS = ['store', 'storeAs', 'move', 'storePublicly', 'storePubliclyAs'];
+
+    /** File type validation: rules, Rule/File objects, or explicit MIME and extension checks. */
+    private const TYPE_VALIDATION = '/mimes:|mimetypes:|[\'"|]image[\'"|:]|extensions:|File::(?:image|types)|Rule::imageFile|dimensions:|getMimeType\(|getClientMimeType\(|guessExtension\(|allowed_?(?:extensions|types|mimes)|\bmimeType\(/i';
+
     public function id(): string
     {
         return 'SS009';
@@ -35,41 +39,34 @@ class FileUploadCheck implements Advisory, Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
+    /**
+     * An upload becomes code execution when it lands somewhere the web server
+     * serves and nothing restricts its type. Uploads to private disks, or
+     * validated in the method, its class, or a form request the method takes,
+     * are not reported.
+     */
     public function run(Context $ctx): iterable
     {
-        $nodeFinder = new NodeFinder;
+        $finder = new NodeFinder;
 
         foreach ($ctx->phpFiles('app') as $file) {
             $stmts = $ctx->ast($file);
-            if (empty($stmts)) {
-                continue;
-            }
+            $source = $ctx->fileContents($file) ?? '';
 
-            $methodCalls = $nodeFinder->findInstanceOf($stmts, Node\Expr\MethodCall::class);
-
-            foreach ($methodCalls as $call) {
-                if (! ($call->name instanceof Node\Identifier)) {
-                    continue;
-                }
-
-                $methodName = $call->name->toString();
-
-                // Look for file store/move without validation
-                if (! in_array($methodName, ['store', 'storeAs', 'move', 'storePublicly', 'storePubliclyAs'], true)) {
-                    continue;
-                }
-
-                // Check if the call is on a file/uploaded file object
-                if (! $this->isOnFileObject($call)) {
-                    continue;
-                }
-
-                // Check if there's validation for file type nearby
-                if (! $this->hasFileValidation($call, $stmts, $nodeFinder)) {
-                    $className = $this->resolveClassName($call, $stmts, $nodeFinder);
+            foreach ($finder->findInstanceOf($stmts, Node\Stmt\ClassMethod::class) as $method) {
+                foreach ($finder->findInstanceOf($method->stmts ?? [], Node\Expr\MethodCall::class) as $call) {
+                    if (! $call->name instanceof Node\Identifier || ! in_array($call->name->toString(), self::STORE_METHODS, true)) {
+                        continue;
+                    }
+                    if (! $this->isOnUploadedFile($call) || ! $this->isPublicDestination($call)) {
+                        continue;
+                    }
+                    if ($this->isValidated($ctx, $method, $source)) {
+                        continue;
+                    }
 
                     yield new Finding(
                         checkId: $this->id(),
@@ -77,47 +74,53 @@ class FileUploadCheck implements Advisory, Check
                         checkVersion: $this->version(),
                         severity: $this->severity(),
                         category: $this->category(),
-                        message: "File upload via {$methodName}() without apparent file type validation. Attackers could upload executable files.",
+                        message: "An uploaded file is written to a publicly served location with {$call->name->toString()}() and its type is never validated. An attacker can upload a .php file and run it on the server.",
                         file: $file,
                         line: $call->getStartLine(),
-                        symbol: $className,
-                        remediation: "Validate file type before storing: \$request->validate(['file' => 'file|mimes:jpg,png,pdf|max:10240'])",
+                        symbol: $method->name->toString(),
+                        remediation: "Validate the type before storing, e.g. ['file' => 'required|file|mimes:jpg,png,pdf|max:10240'], and keep uploads on a private disk served through a controller.",
                     );
                 }
             }
         }
     }
 
-    private function isOnFileObject(Node\Expr\MethodCall $call): bool
+    private function isOnUploadedFile(Node\Expr\MethodCall $call): bool
     {
-        // Check if called on $request->file(...) or variable that looks like a file
-        if ($call->var instanceof Node\Expr\MethodCall) {
-            $innerMethod = $call->var->name instanceof Node\Identifier ? $call->var->name->toString() : '';
-            if ($innerMethod === 'file') {
-                return true;
-            }
+        if ($call->var instanceof Node\Expr\MethodCall && $call->var->name instanceof Node\Identifier && $call->var->name->toString() === 'file') {
+            return true;
         }
 
-        if ($call->var instanceof Node\Expr\Variable) {
-            $varName = is_string($call->var->name) ? $call->var->name : '';
-            if (str_contains(strtolower($varName), 'file') || str_contains(strtolower($varName), 'upload') || str_contains(strtolower($varName), 'image')) {
-                return true;
-            }
-        }
-
-        return false;
+        return $call->var instanceof Node\Expr\Variable && is_string($call->var->name)
+            && preg_match('/file|upload|image|photo|avatar|logo|attachment|banner|document/i', $call->var->name);
     }
 
-    private function hasFileValidation(Node\Expr $call, array $stmts, NodeFinder $nodeFinder): bool
+    /** storePublicly(), the public disk, public_path(), or a web-served folder under base_path(). */
+    private function isPublicDestination(Node\Expr\MethodCall $call): bool
     {
-        $allMethodCalls = $nodeFinder->findInstanceOf($stmts, Node\Expr\MethodCall::class);
+        $method = $call->name->toString();
+        if (in_array($method, ['storePublicly', 'storePubliclyAs'], true)) {
+            return true;
+        }
 
-        foreach ($allMethodCalls as $mc) {
-            if (! ($mc->name instanceof Node\Identifier)) {
+        $finder = new NodeFinder;
+        foreach ($call->getRawArgs() as $index => $arg) {
+            if (! $arg instanceof Node\Arg) {
                 continue;
             }
-            $name = $mc->name->toString();
-            if ($name === 'validate' && abs($mc->getStartLine() - $call->getStartLine()) < 20) {
+            $strings = array_map(fn (Node\Scalar\String_ $s) => $s->value, $finder->findInstanceOf($arg->value, Node\Scalar\String_::class));
+            $functions = array_map(fn (Node\Expr\FuncCall $f) => $f->name instanceof Node\Name ? $f->name->toString() : '', $finder->findInstanceOf($arg->value, Node\Expr\FuncCall::class));
+
+            if ($method === 'move' && $index === 0) {
+                if (in_array('public_path', $functions, true)) {
+                    return true;
+                }
+                if (in_array('base_path', $functions, true) && preg_grep('/^\/?(?:public|assets|uploads|img|images|media)\b/i', $strings)) {
+                    return true;
+                }
+            }
+            // store('avatars', 'public') / storeAs($dir, $name, ['disk' => 'public'])
+            if ($method !== 'move' && $index > 0 && in_array('public', $strings, true)) {
                 return true;
             }
         }
@@ -125,15 +128,25 @@ class FileUploadCheck implements Advisory, Check
         return false;
     }
 
-    private function resolveClassName(Node\Expr $node, array $stmts, NodeFinder $nodeFinder): ?string
+    private function isValidated(Context $ctx, Node\Stmt\ClassMethod $method, string $classSource): bool
     {
-        $classes = $nodeFinder->findInstanceOf($stmts, Node\Stmt\Class_::class);
-        foreach ($classes as $class) {
-            if ($node->getStartLine() >= $class->getStartLine() && $node->getEndLine() <= $class->getEndLine()) {
-                return $class->namespacedName?->toString() ?? $class->name?->toString();
+        // In the class: the method itself, rules(), Livewire $rules or #[Validate].
+        if (preg_match(self::TYPE_VALIDATION, $classSource)) {
+            return true;
+        }
+
+        // In a form request the method type-hints.
+        foreach ($method->params as $param) {
+            $type = $param->type instanceof Node\Name ? $param->type->toString() : null;
+            if ($type === null || in_array($type, ['Illuminate\\Http\\Request', 'Request'], true)) {
+                continue;
+            }
+            $file = $ctx->classFile($type);
+            if ($file !== null && preg_match(self::TYPE_VALIDATION, $ctx->fileContents($file) ?? '')) {
+                return true;
             }
         }
 
-        return null;
+        return false;
     }
 }

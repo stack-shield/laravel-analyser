@@ -2,14 +2,13 @@
 
 namespace StackShield\Analyser\Checks\Config;
 
-use StackShield\Analyser\Checks\Advisory;
 use StackShield\Analyser\Checks\Check;
 use StackShield\Analyser\Context;
 use StackShield\Analyser\Enums\Category;
 use StackShield\Analyser\Enums\Severity;
 use StackShield\Analyser\Finding;
 
-class TrustedProxiesCheck implements Advisory, Check
+class TrustedProxiesCheck implements Check
 {
     public function id(): string
     {
@@ -33,7 +32,7 @@ class TrustedProxiesCheck implements Advisory, Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -46,6 +45,11 @@ class TrustedProxiesCheck implements Advisory, Check
             $lines = explode("\n", $contents);
 
             foreach ($lines as $lineNum => $line) {
+                // env('TRUSTED_PROXIES', '*') leaves the choice to each deployment.
+                if (str_contains($line, 'env(')) {
+                    continue;
+                }
+
                 if (preg_match('/protected\s+\$proxies\s*=\s*[\'\"]\*[\'\"]/', $line)
                     || preg_match('/protected\s+\$proxies\s*=\s*\'\*\'/', $line)) {
                     yield new Finding(
@@ -75,6 +79,11 @@ class TrustedProxiesCheck implements Advisory, Check
             $lines = explode("\n", $bootstrapContents);
 
             foreach ($lines as $lineNum => $line) {
+                // env('TRUSTED_PROXIES', '*') leaves the choice to each deployment.
+                if (str_contains($line, 'env(')) {
+                    continue;
+                }
+
                 if (preg_match('/trustProxies\s*\(\s*at\s*:\s*[\'\"]\*[\'\"]/', $line)
                     || preg_match('/trustProxies\s*\([^)]*[\'\"]\*[\'\"]/', $line)) {
                     yield new Finding(

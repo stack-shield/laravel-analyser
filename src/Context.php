@@ -26,6 +26,9 @@ final class Context
     /** @var string[] Relative paths of files that could not be parsed. */
     private array $unparseable = [];
 
+    /** @var array<string, mixed> */
+    private array $memo = [];
+
     private ?array $composerLockCache = null;
 
     private ?array $composerJsonCache = null;
@@ -69,6 +72,40 @@ final class Context
         $stmts = $traverser->traverse($stmts);
 
         return $this->astCache[$absolutePath] = $stmts;
+    }
+
+    /**
+     * Compute once per scan: route tables and similar derived data shared
+     * by several checks.
+     */
+    public function remember(string $key, callable $compute): mixed
+    {
+        if (! array_key_exists($key, $this->memo)) {
+            $this->memo[$key] = $compute();
+        }
+
+        return $this->memo[$key];
+    }
+
+    /** The file defining a class, through the project's PSR-4 autoload map. */
+    public function classFile(string $class): ?string
+    {
+        $class = ltrim($class, '\\');
+        $map = ($this->composerJson()['autoload']['psr-4'] ?? []) + ['App\\' => 'app/'];
+
+        foreach ($map as $prefix => $dirs) {
+            if (! str_starts_with($class, $prefix)) {
+                continue;
+            }
+            foreach ((array) $dirs as $dir) {
+                $file = rtrim($dir, '/').'/'.str_replace('\\', '/', substr($class, strlen($prefix))).'.php';
+                if ($this->fileExists($file)) {
+                    return $file;
+                }
+            }
+        }
+
+        return null;
     }
 
     /** @return string[] */

@@ -82,12 +82,23 @@ class KnownAdvisoriesCheck implements Check
                 continue;
             }
 
-            $severities = array_map(fn (array $advisory) => $this->mapSeverity($advisory['severity'] ?? null), $affecting);
+            // Maintainers get a grace period to ship a fix before a new
+            // advisory counts toward the grade; it is reported either way.
+            $graceDays = (int) ($ctx->config()['advisory_grace_days'] ?? 14);
+            $mature = array_values(array_filter($affecting, fn (array $advisory) => $this->ageInDays($advisory) >= $graceDays));
+            $grading = $mature !== [] ? $mature : $affecting;
+
+            $severities = array_map(fn (array $advisory) => $this->mapSeverity($advisory['severity'] ?? null), $grading);
             usort($severities, fn (Severity $x, Severity $y) => $y->weight() <=> $x->weight());
             $ids = array_map(fn (array $advisory) => $advisory['cve'] ?? $advisory['advisoryId'] ?? 'unknown', $affecting);
             $summary = count($affecting) === 1
                 ? ($affecting[0]['title'] ?? 'Security advisory')." ({$ids[0]})"
                 : count($affecting).' known vulnerabilities ('.implode(', ', array_slice($ids, 0, 5)).(count($ids) > 5 ? ', ...' : '').')';
+            $note = match (true) {
+                $dev => ' It is a development dependency, so it does not ship to production.',
+                $mature === [] => " Published in the last {$graceDays} days, so it does not count toward the grade yet.",
+                default => '',
+            };
 
             yield new Finding(
                 checkId: $this->id(),
@@ -95,14 +106,21 @@ class KnownAdvisoriesCheck implements Check
                 checkVersion: $this->version(),
                 severity: $severities[0],
                 category: $this->category(),
-                message: "{$name} {$version} is affected by {$summary}.".($dev ? ' It is a development dependency, so it does not ship to production.' : ''),
+                message: "{$name} {$version} is affected by {$summary}.{$note}",
                 file: 'composer.lock',
                 symbol: $name,
                 snippet: "\"{$name}\": \"{$version}\"",
                 remediation: "Update {$name} to a patched version: composer update {$name}",
-                advisory: $dev,
+                advisory: $dev || $mature === [],
             );
         }
+    }
+
+    private function ageInDays(array $advisory): float
+    {
+        $reported = strtotime((string) ($advisory['reportedAt'] ?? ''));
+
+        return $reported === false ? PHP_INT_MAX : (time() - $reported) / 86400;
     }
 
     /**

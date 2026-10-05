@@ -9,6 +9,8 @@ use StackShield\Analyser\Context;
 use StackShield\Analyser\Enums\Category;
 use StackShield\Analyser\Enums\Severity;
 use StackShield\Analyser\Finding;
+use StackShield\Analyser\Routes\Route;
+use StackShield\Analyser\Routes\RouteCollector;
 
 class CsrfExemptionCheck implements Check
 {
@@ -34,137 +36,136 @@ class CsrfExemptionCheck implements Check
 
     public function version(): int
     {
-        return 2;
+        return 3;
     }
 
+    /**
+     * CSRF protection matters for state-changing routes that trust the session
+     * cookie. An exemption is only a vulnerability when it covers such a
+     * route: webhooks, daemon APIs with their own tokens, and public forms
+     * are exempted correctly.
+     */
     public function run(Context $ctx): iterable
     {
-        // Check VerifyCsrfToken middleware for $except
-        $middlewarePaths = [
-            'app/Http/Middleware/VerifyCsrfToken.php',
-        ];
+        $routes = RouteCollector::routes($ctx);
 
-        foreach ($middlewarePaths as $path) {
-            $stmts = $ctx->ast($path);
-            if (empty($stmts)) {
+        foreach ($this->exemptions($ctx) as [$pattern, $file, $line]) {
+            if ($this->isExternalCallback($pattern)) {
                 continue;
             }
 
-            $nodeFinder = new NodeFinder;
-            $classes = $nodeFinder->findInstanceOf($stmts, Node\Stmt\Class_::class);
+            if (trim($pattern, '/ ') === '*') {
+                yield $this->finding(Severity::High, "The CSRF exemption '{$pattern}' disables CSRF protection for every route.", $pattern, $file, $line);
 
-            foreach ($classes as $class) {
-                foreach ($class->stmts as $stmt) {
-                    if (! ($stmt instanceof Node\Stmt\Property)) {
-                        continue;
+                continue;
+            }
+
+            $exposed = array_values(array_filter($routes, fn (Route $route) => ! $route->inGroup('api')
+                && $route->isStateChanging()
+                && $route->matches($pattern)
+                && ($route->hasSessionAuth() || RouteCollector::controllerRequiresAuth($ctx, $route->controller, $route->action))));
+
+            if ($exposed === []) {
+                continue;
+            }
+
+            $examples = implode(', ', array_map(fn (Route $route) => implode('|', $route->methods).' /'.$route->uri, array_slice($exposed, 0, 3)));
+
+            yield $this->finding(
+                str_contains($pattern, '*') ? Severity::High : Severity::Medium,
+                "The CSRF exemption '{$pattern}' covers ".count($exposed)." state-changing route(s) authenticated by the session cookie ({$examples}). Another site can submit these on behalf of a logged-in user.",
+                $pattern,
+                $file,
+                $line,
+            );
+        }
+    }
+
+    /**
+     * Endpoints called by other servers or API clients (payment webhooks,
+     * OAuth token exchange, SAML and OAuth callbacks, health checks) cannot
+     * send a CSRF token; exempting them is the documented setup.
+     */
+    private function isExternalCallback(string $pattern): bool
+    {
+        return (bool) preg_match('/webhook|hook|stripe|paypal|mollie|paddle|braintree|ipn|callback|oauth|saml|sso|notify|health|cron|pusher/i', $pattern);
+    }
+
+    private function finding(Severity $severity, string $message, string $pattern, string $file, int $line): Finding
+    {
+        return new Finding(
+            checkId: $this->id(),
+            checkName: $this->name(),
+            checkVersion: $this->version(),
+            severity: $severity,
+            category: $this->category(),
+            message: $message,
+            file: $file,
+            line: $line,
+            symbol: 'csrf.except',
+            snippet: "'{$pattern}'",
+            remediation: 'Remove the exemption so these routes require a CSRF token. Exempt only endpoints called by other servers, and authenticate those with a signature or token instead of the session.',
+        );
+    }
+
+    /**
+     * Patterns from VerifyCsrfToken::$except (Laravel 10 and earlier) and
+     * validateCsrfTokens()/preventRequestForgery() except: lists or
+     * VerifyCsrfToken::except() calls (11+).
+     *
+     * @return array<int, array{0: string, 1: string, 2: int}>
+     */
+    private function exemptions(Context $ctx): array
+    {
+        $exemptions = [];
+        $finder = new NodeFinder;
+
+        foreach ($ctx->phpFiles('app/Http/Middleware') as $file) {
+            foreach ($finder->findInstanceOf($ctx->ast($file), Node\PropertyItem::class) as $property) {
+                if ($property->name->toString() === 'except' && $property->default instanceof Node\Expr\Array_
+                    && preg_match('/Csrf|Forgery/i', $file)) {
+                    foreach ($this->strings($property->default) as [$pattern, $line]) {
+                        $exemptions[] = [$pattern, $file, $line];
                     }
+                }
+            }
+        }
 
-                    foreach ($stmt->props as $prop) {
-                        if ($prop->name->toString() !== 'except') {
-                            continue;
-                        }
+        $sources = ['bootstrap/app.php', ...iterator_to_array($ctx->phpFiles('app/Providers'), false)];
+        foreach ($sources as $file) {
+            $calls = $finder->find($ctx->ast($file), fn (Node $node) => ($node instanceof Node\Expr\MethodCall || $node instanceof Node\Expr\StaticCall)
+                && $node->name instanceof Node\Identifier
+                && in_array($node->name->toString(), ['validateCsrfTokens', 'preventRequestForgery', 'except'], true));
 
-                        if ($prop->default instanceof Node\Expr\Array_) {
-                            foreach ($prop->default->items as $item) {
-                                if ($item->value instanceof Node\Scalar\String_) {
-                                    $exemptedUri = $item->value->value;
-                                    if ($this->isExternalCallback($exemptedUri)) {
-                                        continue;
-                                    }
-
-                                    // Flag broad exemptions
-                                    if ($this->isBroadExemption($exemptedUri)) {
-                                        yield new Finding(
-                                            checkId: $this->id(),
-                                            checkName: $this->name(),
-                                            checkVersion: $this->version(),
-                                            severity: Severity::High,
-                                            category: $this->category(),
-                                            message: "Broad CSRF exemption pattern '{$exemptedUri}' disables CSRF protection for multiple routes. This enables cross-site request forgery attacks.",
-                                            file: $path,
-                                            line: $item->getStartLine(),
-                                            symbol: 'VerifyCsrfToken::$except',
-                                            snippet: "'{$exemptedUri}'",
-                                            remediation: 'Narrow the CSRF exemption to specific webhook endpoints that genuinely need it, and verify requests using webhook signatures instead.',
-                                            advisory: ! $this->isBlanketExemption($exemptedUri),
-                                        );
-                                    } else {
-                                        yield new Finding(
-                                            checkId: $this->id(),
-                                            checkName: $this->name(),
-                                            checkVersion: $this->version(),
-                                            severity: $this->severity(),
-                                            category: $this->category(),
-                                            message: "Route '{$exemptedUri}' is exempt from CSRF verification. Ensure this is intentional and the route validates requests through an alternative mechanism (e.g., webhook signatures).",
-                                            file: $path,
-                                            line: $item->getStartLine(),
-                                            symbol: 'VerifyCsrfToken::$except',
-                                            snippet: "'{$exemptedUri}'",
-                                            remediation: 'If this route handles webhooks, verify requests using the provider\'s webhook signature. If it\'s a regular form endpoint, remove the CSRF exemption.',
-                                            advisory: true,
-                                        );
-                                    }
-                                }
-                            }
+            foreach ($calls as $call) {
+                if ($call->name->toString() === 'except'
+                    && ! ($call instanceof Node\Expr\StaticCall && $call->class instanceof Node\Name && preg_match('/Csrf|Forgery/i', $call->class->toString()))) {
+                    continue;
+                }
+                foreach ($call->getRawArgs() as $arg) {
+                    if ($arg instanceof Node\Arg && $arg->value instanceof Node\Expr\Array_
+                        && ($arg->name === null || $arg->name->toString() === 'except')) {
+                        foreach ($this->strings($arg->value) as [$pattern, $line]) {
+                            $exemptions[] = [$pattern, $file, $line];
                         }
                     }
                 }
             }
         }
 
-        // Laravel 11+ uses bootstrap/app.php for CSRF exceptions
-        $bootstrapApp = $ctx->fileContents('bootstrap/app.php');
-        if ($bootstrapApp !== null && str_contains($bootstrapApp, 'validateCsrfTokens')) {
-            // Check for except patterns
-            if (preg_match_all("/except:\s*\[([^\]]+)\]/s", $bootstrapApp, $matches)) {
-                foreach ($matches[1] as $exceptBlock) {
-                    preg_match_all("/['\"]([^'\"]+)['\"]/", $exceptBlock, $uriMatches);
-                    foreach ($uriMatches[1] as $uri) {
-                        if ($this->isExternalCallback($uri)) {
-                            continue;
-                        }
-                        $severity = $this->isBroadExemption($uri) ? Severity::High : $this->severity();
-                        yield new Finding(
-                            checkId: $this->id(),
-                            checkName: $this->name(),
-                            checkVersion: $this->version(),
-                            severity: $severity,
-                            category: $this->category(),
-                            message: "Route '{$uri}' is exempt from CSRF verification in bootstrap/app.php.",
-                            file: 'bootstrap/app.php',
-                            symbol: 'validateCsrfTokens',
-                            snippet: $uri,
-                            remediation: 'Verify requests using webhook signatures or other authentication mechanisms.',
-                            advisory: ! $this->isBlanketExemption($uri),
-                        );
-                    }
-                }
+        return $exemptions;
+    }
+
+    /** @return array<int, array{0: string, 1: int}> */
+    private function strings(Node\Expr\Array_ $array): array
+    {
+        $strings = [];
+        foreach (array_filter($array->items) as $item) {
+            if ($item->value instanceof Node\Scalar\String_) {
+                $strings[] = [$item->value->value, $item->getStartLine()];
             }
         }
-    }
 
-    /**
-     * Endpoints called by other servers (payment webhooks, OAuth and SAML
-     * callbacks, health checks) cannot send a CSRF token; exempting them is
-     * correct.
-     */
-    private function isExternalCallback(string $uri): bool
-    {
-        return (bool) preg_match('/webhook|hook|stripe|paypal|mollie|paddle|braintree|ipn|callback|oauth|saml|sso|notify|health|cron|pusher|broadcasting/i', $uri);
-    }
-
-    /**
-     * Only an exemption covering every route is graded. A wildcard over one
-     * area ('remote/*', '/dav/*') usually serves a non-browser client
-     * authenticated another way, which static analysis cannot confirm.
-     */
-    private function isBlanketExemption(string $uri): bool
-    {
-        return trim($uri, '/ ') === '*';
-    }
-
-    private function isBroadExemption(string $uri): bool
-    {
-        return str_contains($uri, '*') || str_contains($uri, 'api/*') || $uri === '*';
+        return $strings;
     }
 }

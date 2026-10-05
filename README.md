@@ -47,14 +47,14 @@ The analyser includes 39 security checks across 5 categories. Checks marked *adv
 | SS003 | Dangerous sinks (eval, shell_exec) with user input | Critical |
 | SS007 | Unvalidated request input in controllers (advisory) | Medium |
 | SS008 | Hardcoded credentials in source code | High |
-| SS009 | File upload without validation (advisory) | High |
+| SS009 | Upload to a publicly served location without type validation | High |
 | SS040 | Insecure random number generation | Medium |
 | SS041 | Open redirect via user input | High |
 | SS042 | Weak hashing (md5/sha1 for passwords) | High |
 | SS043 | Unsafe deserialization | Critical |
 | SS044 | Blade raw output ({!! !!}) of request data (named variables are advisory) | Medium |
 | SS053 | Missing authorization in controllers (advisory) | Medium |
-| SS054 | Mass delete without constraints (advisory) | Medium |
+| SS054 | Unconstrained delete in an action reachable without auth | High |
 
 ### Configuration
 | ID | Check | Severity |
@@ -67,7 +67,7 @@ The analyser includes 39 security checks across 5 categories. Checks marked *adv
 | SS015 | Insecure session cookie settings | Medium |
 | SS016 | Wildcard CORS configuration | Medium |
 | SS017 | Mail driver set to log/array in production | Low |
-| SS045 | Trusted proxies set to wildcard (advisory) | Medium |
+| SS045 | Trusted proxies hardcoded to wildcard | Medium |
 | SS046 | Broadcasting channels without auth | Medium |
 | SS047 | Queue connection sync in production | Medium |
 | SS048 | File cache driver in production | Low |
@@ -78,9 +78,9 @@ The analyser includes 39 security checks across 5 categories. Checks marked *adv
 |----|-------|----------|
 | SS004 | Auth routes without rate limiting | Medium |
 | SS005 | Route model binding without auth (advisory) | Medium |
-| SS006 | CSRF exemptions (only a blanket `*` exemption is graded) | High |
+| SS006 | CSRF exemptions covering session-authenticated, state-changing routes | High |
 | SS050 | API routes without rate limiting | Medium |
-| SS051 | Debug/test routes in production (advisory) | High |
+| SS051 | Debug or phpinfo routes reachable without auth | High |
 | SS052 | Overly broad wildcard routes | Low |
 
 ### Filesystem
@@ -95,8 +95,8 @@ The analyser includes 39 security checks across 5 categories. Checks marked *adv
 ### Dependencies
 | ID | Check | Severity |
 |----|-------|----------|
-| SS030 | Known security advisories in composer.lock (Packagist advisory database; makes one network request, skipped with `offline: true`) | From the advisory |
-| SS055 | Outdated Laravel version | Medium |
+| SS030 | Known security advisories in composer.lock, one finding per package (Packagist advisory database; one network request, skipped with `offline: true`; advisories younger than `advisory_grace_days`, default 14, are reported but not graded) | From the advisory |
+| SS055 | Laravel version past its security fixes | High |
 
 ## Grading
 
