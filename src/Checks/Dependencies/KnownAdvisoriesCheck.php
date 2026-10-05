@@ -70,29 +70,38 @@ class KnownAdvisoriesCheck implements Check
 
         $advisories = $this->advisories(array_keys($installed), $ctx->config()['advisory_cache_dir'] ?? null);
 
+        // One finding per vulnerable package: an outdated dependency is one
+        // problem to fix, however many advisories it has collected.
         foreach ($installed as $name => ['version' => $version, 'dev' => $dev]) {
-            foreach ($advisories[$name] ?? [] as $advisory) {
-                if (! $this->isAffected($version, $advisory['affectedVersions'] ?? '')) {
-                    continue;
-                }
+            $affecting = array_values(array_filter(
+                $advisories[$name] ?? [],
+                fn (array $advisory) => $this->isAffected($version, $advisory['affectedVersions'] ?? ''),
+            ));
 
-                $id = $advisory['cve'] ?? $advisory['advisoryId'] ?? 'unknown';
-                $title = $advisory['title'] ?? 'Security advisory';
-
-                yield new Finding(
-                    checkId: $this->id(),
-                    checkName: $this->name(),
-                    checkVersion: $this->version(),
-                    severity: $this->mapSeverity($advisory['severity'] ?? null),
-                    category: $this->category(),
-                    message: "{$name} {$version} is affected by a known vulnerability: {$title} ({$id}).".($dev ? ' It is a development dependency, so it does not ship to production.' : ''),
-                    file: 'composer.lock',
-                    symbol: $name,
-                    snippet: "\"{$name}\": \"{$version}\"",
-                    remediation: "Update {$name} to a version outside {$advisory['affectedVersions']}: composer update {$name}",
-                    advisory: $dev,
-                );
+            if ($affecting === []) {
+                continue;
             }
+
+            $severities = array_map(fn (array $advisory) => $this->mapSeverity($advisory['severity'] ?? null), $affecting);
+            usort($severities, fn (Severity $x, Severity $y) => $y->weight() <=> $x->weight());
+            $ids = array_map(fn (array $advisory) => $advisory['cve'] ?? $advisory['advisoryId'] ?? 'unknown', $affecting);
+            $summary = count($affecting) === 1
+                ? ($affecting[0]['title'] ?? 'Security advisory')." ({$ids[0]})"
+                : count($affecting).' known vulnerabilities ('.implode(', ', array_slice($ids, 0, 5)).(count($ids) > 5 ? ', ...' : '').')';
+
+            yield new Finding(
+                checkId: $this->id(),
+                checkName: $this->name(),
+                checkVersion: $this->version(),
+                severity: $severities[0],
+                category: $this->category(),
+                message: "{$name} {$version} is affected by {$summary}.".($dev ? ' It is a development dependency, so it does not ship to production.' : ''),
+                file: 'composer.lock',
+                symbol: $name,
+                snippet: "\"{$name}\": \"{$version}\"",
+                remediation: "Update {$name} to a patched version: composer update {$name}",
+                advisory: $dev,
+            );
         }
     }
 
