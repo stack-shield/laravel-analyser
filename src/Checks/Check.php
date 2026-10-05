@@ -1,10 +1,10 @@
 <?php
 
-namespace Stackshield\Scanner\Checks;
+namespace StackShield\Analyser\Checks;
 
-use Stackshield\Scanner\Context;
-use Stackshield\Scanner\Enums\Category;
-use Stackshield\Scanner\Enums\Severity;
+use StackShield\Analyser\Context;
+use StackShield\Analyser\Enums\Category;
+use StackShield\Analyser\Enums\Severity;
 
 interface Check
 {
@@ -18,6 +18,6 @@ interface Check
 
     public function version(): int;
 
-    /** @return iterable<\Stackshield\Scanner\Finding> */
+    /** @return iterable<\StackShield\Analyser\Finding> */
     public function run(Context $ctx): iterable;
 }

@@ -1,9 +1,9 @@
 <?php
 
-namespace Stackshield\Scanner\Baseline;
+namespace StackShield\Analyser\Baseline;
 
-use Stackshield\Scanner\Finding;
-use Stackshield\Scanner\Scanner;
+use StackShield\Analyser\Finding;
+use StackShield\Analyser\Scanner;
 use Symfony\Component\Yaml\Yaml;
 
 final class Baseline

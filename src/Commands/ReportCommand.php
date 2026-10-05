@@ -1,13 +1,13 @@
 <?php
 
-namespace Stackshield\Scanner\Commands;
+namespace StackShield\Analyser\Commands;
 
 use Illuminate\Console\Command;
-use Stackshield\Scanner\Scanner;
+use StackShield\Analyser\Scanner;
 
 class ReportCommand extends Command
 {
-    protected $signature = 'stackshield:report
+    protected $signature = 'stackshield:analyse-report
         {--format=json : Output format (json, sarif, markdown, ai)}
         {--output= : Write output to file or directory}';
 
@@ -32,9 +32,9 @@ class ReportCommand extends Command
         }
 
         $reporter = match ($format) {
-            'sarif' => new \Stackshield\Scanner\Reporters\SarifReporter,
-            'markdown', 'md' => new \Stackshield\Scanner\Reporters\MarkdownReporter,
-            default => new \Stackshield\Scanner\Reporters\JsonReporter,
+            'sarif' => new \StackShield\Analyser\Reporters\SarifReporter,
+            'markdown', 'md' => new \StackShield\Analyser\Reporters\MarkdownReporter,
+            default => new \StackShield\Analyser\Reporters\JsonReporter,
         };
 
         $output = $reporter->render($report);
@@ -49,7 +49,7 @@ class ReportCommand extends Command
         return self::SUCCESS;
     }
 
-    private function generateAiBundle(\Stackshield\Scanner\Report $report, string $outputDir): int
+    private function generateAiBundle(\StackShield\Analyser\Report $report, string $outputDir): int
     {
         if (! is_dir($outputDir)) {
             mkdir($outputDir, 0755, true);
@@ -62,7 +62,7 @@ class ReportCommand extends Command
         }
 
         // Write findings.json
-        $jsonReporter = new \Stackshield\Scanner\Reporters\JsonReporter;
+        $jsonReporter = new \StackShield\Analyser\Reporters\JsonReporter;
         file_put_contents("{$outputDir}/findings.json", $jsonReporter->render($report));
 
         // Write per-finding fix files
@@ -102,7 +102,7 @@ class ReportCommand extends Command
         $readme .= "1. Read `context/related-files.md` and open each listed file\n";
         $readme .= "2. Read each file in `fixes/` and apply the suggested remediation\n";
         $readme .= "3. Run your test suite after each fix\n";
-        $readme .= "4. Run `php artisan stackshield:scan` to verify findings are resolved\n";
+        $readme .= "4. Run `php artisan stackshield:analyse` to verify findings are resolved\n";
         $readme .= "5. Open a PR with all changes\n";
         file_put_contents("{$outputDir}/README.md", $readme);
 

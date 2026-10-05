@@ -1,13 +1,13 @@
 <?php
 
-use Stackshield\Scanner\Enums\Category;
-use Stackshield\Scanner\Enums\Severity;
-use Stackshield\Scanner\Finding;
-use Stackshield\Scanner\Reporters\ConsoleReporter;
-use Stackshield\Scanner\Reporters\JsonReporter;
-use Stackshield\Scanner\Reporters\MarkdownReporter;
-use Stackshield\Scanner\Reporters\SarifReporter;
-use Stackshield\Scanner\Report;
+use StackShield\Analyser\Enums\Category;
+use StackShield\Analyser\Enums\Severity;
+use StackShield\Analyser\Finding;
+use StackShield\Analyser\Reporters\ConsoleReporter;
+use StackShield\Analyser\Reporters\JsonReporter;
+use StackShield\Analyser\Reporters\MarkdownReporter;
+use StackShield\Analyser\Reporters\SarifReporter;
+use StackShield\Analyser\Report;
 
 function createTestReport(): Report
 {

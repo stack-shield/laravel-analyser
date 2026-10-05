@@ -1,5 +1,5 @@
 <?php
 
-use Stackshield\Scanner\Tests\TestCase;
+use StackShield\Analyser\Tests\TestCase;
 
 uses(TestCase::class)->in('Unit', 'Feature');

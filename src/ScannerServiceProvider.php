@@ -1,13 +1,13 @@
 <?php
 
-namespace Stackshield\Scanner;
+namespace StackShield\Analyser;
 
 use Illuminate\Support\ServiceProvider;
-use Stackshield\Scanner\Commands\BaselineCommand;
-use Stackshield\Scanner\Commands\ChecksCommand;
-use Stackshield\Scanner\Commands\FixCommand;
-use Stackshield\Scanner\Commands\ReportCommand;
-use Stackshield\Scanner\Commands\ScanCommand;
+use StackShield\Analyser\Commands\BaselineCommand;
+use StackShield\Analyser\Commands\ChecksCommand;
+use StackShield\Analyser\Commands\FixCommand;
+use StackShield\Analyser\Commands\ReportCommand;
+use StackShield\Analyser\Commands\ScanCommand;
 use Symfony\Component\Yaml\Yaml;
 
 class ScannerServiceProvider extends ServiceProvider

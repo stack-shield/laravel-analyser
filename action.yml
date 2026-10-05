@@ -32,11 +32,11 @@ runs:
 
     - name: Install Stackshield Scanner
       shell: bash
-      run: composer require --dev stackshield/scanner --no-interaction
+      run: composer require --dev stackshield/laravel-analyser --no-interaction
 
     - name: Run scan
       shell: bash
-      run: php artisan stackshield:scan --format=${{ inputs.format }} --fail-on=${{ inputs.fail-on }} --output=stackshield-results.${{ inputs.format == 'sarif' && 'sarif' || inputs.format == 'json' && 'json' || 'txt' }}
+      run: php artisan stackshield:analyse --format=${{ inputs.format }} --fail-on=${{ inputs.fail-on }} --output=stackshield-results.${{ inputs.format == 'sarif' && 'sarif' || inputs.format == 'json' && 'json' || 'txt' }}
 
     - name: Upload SARIF
       if: ${{ inputs.format == 'sarif' && always() }}

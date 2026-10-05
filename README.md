@@ -5,7 +5,7 @@ A Laravel-aware static application security testing (SAST) tool. Scans your Lara
 ## Installation
 
 ```bash
-composer require --dev stackshield/scanner
+composer require --dev stackshield/laravel-analyser
 ```
 
 The service provider is auto-discovered by Laravel.
@@ -14,23 +14,23 @@ The service provider is auto-discovered by Laravel.
 
 ```bash
 # Run a scan
-php artisan stackshield:scan
+php artisan stackshield:analyse
 
 # Output as JSON
-php artisan stackshield:scan --format=json
+php artisan stackshield:analyse --format=json
 
 # Output as SARIF (for GitHub Code Scanning)
-php artisan stackshield:scan --format=sarif --output=results.sarif
+php artisan stackshield:analyse --format=sarif --output=results.sarif
 
 # Fail CI on high+ severity findings
-php artisan stackshield:scan --fail-on=high
+php artisan stackshield:analyse --fail-on=high
 
 # List all available checks
-php artisan stackshield:checks
+php artisan stackshield:analyse-checks
 
 # Auto-fix mechanical issues
-php artisan stackshield:fix --dry-run
-php artisan stackshield:fix
+php artisan stackshield:analyse-fix --dry-run
+php artisan stackshield:analyse-fix
 ```
 
 ## Checks
@@ -114,10 +114,10 @@ Suppress known findings so you can focus on new issues:
 
 ```bash
 # Generate a baseline from current findings
-php artisan stackshield:baseline
+php artisan stackshield:analyse-baseline
 
 # Scan using the baseline (suppresses known findings)
-php artisan stackshield:scan --baseline=stackshield-baseline.yaml
+php artisan stackshield:analyse --baseline=stackshield-baseline.yaml
 ```
 
 When you bump a check's version, previously baselined findings for that check resurface.
@@ -166,7 +166,7 @@ Or use the reusable workflow:
 ```yaml
 jobs:
   security:
-    uses: stackshield/scanner/.github/workflows/scan.yml@main
+    uses: stackshield/laravel-analyser/.github/workflows/scan.yml@main
 ```
 
 ## Auto-Fix
@@ -175,13 +175,13 @@ Stackshield can automatically fix some mechanical issues:
 
 ```bash
 # Preview fixes
-php artisan stackshield:fix --dry-run
+php artisan stackshield:analyse-fix --dry-run
 
 # Apply fixes
-php artisan stackshield:fix
+php artisan stackshield:analyse-fix
 
 # Fix only a specific check
-php artisan stackshield:fix --check=SS001
+php artisan stackshield:analyse-fix --check=SS001
 ```
 
 Currently auto-fixable: SS001 (add $fillable), SS012 (disable debug mode).

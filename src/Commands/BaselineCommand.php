@@ -1,14 +1,14 @@
 <?php
 
-namespace Stackshield\Scanner\Commands;
+namespace StackShield\Analyser\Commands;
 
 use Illuminate\Console\Command;
-use Stackshield\Scanner\Baseline\Baseline;
-use Stackshield\Scanner\Scanner;
+use StackShield\Analyser\Baseline\Baseline;
+use StackShield\Analyser\Scanner;
 
 class BaselineCommand extends Command
 {
-    protected $signature = 'stackshield:baseline
+    protected $signature = 'stackshield:analyse-baseline
         {--output=stackshield-baseline.yaml : Output path for baseline file}
         {--add : Only add new findings, keep existing entries}
         {--prune : Remove entries for findings no longer present}';
@@ -62,7 +62,7 @@ class BaselineCommand extends Command
             $data = [
                 'version' => 1,
                 'generated_at' => date('c'),
-                'generator' => 'stackshield-scanner@'.\Stackshield\Scanner\Scanner::VERSION,
+                'generator' => 'stackshield-scanner@'.\StackShield\Analyser\Scanner::VERSION,
                 'findings' => array_values($allEntries),
             ];
 
@@ -86,7 +86,7 @@ class BaselineCommand extends Command
             $data = [
                 'version' => 1,
                 'generated_at' => date('c'),
-                'generator' => 'stackshield-scanner@'.\Stackshield\Scanner\Scanner::VERSION,
+                'generator' => 'stackshield-scanner@'.\StackShield\Analyser\Scanner::VERSION,
                 'findings' => array_values($pruned),
             ];
 

@@ -1,10 +1,10 @@
 <?php
 
-namespace Stackshield\Scanner\Reporters;
+namespace StackShield\Analyser\Reporters;
 
-use Stackshield\Scanner\Enums\Severity;
-use Stackshield\Scanner\Finding;
-use Stackshield\Scanner\Report;
+use StackShield\Analyser\Enums\Severity;
+use StackShield\Analyser\Finding;
+use StackShield\Analyser\Report;
 
 final class ConsoleReporter implements Reporter
 {

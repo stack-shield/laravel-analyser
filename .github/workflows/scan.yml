@@ -22,10 +22,10 @@ jobs:
         run: composer install --prefer-dist --no-progress --no-suggest
 
       - name: Install Stackshield Scanner
-        run: composer require --dev stackshield/scanner --no-interaction
+        run: composer require --dev stackshield/laravel-analyser --no-interaction
 
       - name: Run Stackshield scan
-        run: php artisan stackshield:scan --format=sarif --output=results.sarif
+        run: php artisan stackshield:analyse --format=sarif --output=results.sarif
         continue-on-error: true
 
       - name: Upload SARIF results
@@ -35,5 +35,5 @@ jobs:
           sarif_file: results.sarif
 
       - name: Console report
-        run: php artisan stackshield:scan
+        run: php artisan stackshield:analyse
         if: always()

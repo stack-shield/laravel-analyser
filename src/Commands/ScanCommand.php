@@ -1,18 +1,18 @@
 <?php
 
-namespace Stackshield\Scanner\Commands;
+namespace StackShield\Analyser\Commands;
 
 use Illuminate\Console\Command;
-use Stackshield\Scanner\Baseline\Baseline;
-use Stackshield\Scanner\Reporters\ConsoleReporter;
-use Stackshield\Scanner\Reporters\JsonReporter;
-use Stackshield\Scanner\Reporters\MarkdownReporter;
-use Stackshield\Scanner\Reporters\SarifReporter;
-use Stackshield\Scanner\Scanner;
+use StackShield\Analyser\Baseline\Baseline;
+use StackShield\Analyser\Reporters\ConsoleReporter;
+use StackShield\Analyser\Reporters\JsonReporter;
+use StackShield\Analyser\Reporters\MarkdownReporter;
+use StackShield\Analyser\Reporters\SarifReporter;
+use StackShield\Analyser\Scanner;
 
 class ScanCommand extends Command
 {
-    protected $signature = 'stackshield:scan
+    protected $signature = 'stackshield:analyse
         {--format=console : Output format (console, json, sarif, markdown)}
         {--output= : Write output to file instead of stdout}
         {--baseline= : Path to baseline file}

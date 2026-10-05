@@ -1,14 +1,14 @@
 <?php
 
-namespace Stackshield\Scanner\Checks\Routes;
+namespace StackShield\Analyser\Checks\Routes;
 
 use PhpParser\Node;
 use PhpParser\NodeFinder;
-use Stackshield\Scanner\Checks\Check;
-use Stackshield\Scanner\Context;
-use Stackshield\Scanner\Enums\Category;
-use Stackshield\Scanner\Enums\Severity;
-use Stackshield\Scanner\Finding;
+use StackShield\Analyser\Checks\Check;
+use StackShield\Analyser\Context;
+use StackShield\Analyser\Enums\Category;
+use StackShield\Analyser\Enums\Severity;
+use StackShield\Analyser\Finding;
 
 class RouteModelBindingAuthCheck implements Check
 {

@@ -1,10 +1,10 @@
 <?php
 
-namespace Stackshield\Scanner\Reporters;
+namespace StackShield\Analyser\Reporters;
 
-use Stackshield\Scanner\Finding;
-use Stackshield\Scanner\Report;
-use Stackshield\Scanner\Scanner;
+use StackShield\Analyser\Finding;
+use StackShield\Analyser\Report;
+use StackShield\Analyser\Scanner;
 
 final class SarifReporter implements Reporter
 {

@@ -1,8 +1,8 @@
 <?php
 
-namespace Stackshield\Scanner;
+namespace StackShield\Analyser;
 
-use Stackshield\Scanner\Enums\Severity;
+use StackShield\Analyser\Enums\Severity;
 
 final class Report
 {

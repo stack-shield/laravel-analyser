@@ -1,14 +1,14 @@
 <?php
 
-namespace Stackshield\Scanner\Commands;
+namespace StackShield\Analyser\Commands;
 
 use Illuminate\Console\Command;
-use Stackshield\Scanner\Finding;
-use Stackshield\Scanner\Scanner;
+use StackShield\Analyser\Finding;
+use StackShield\Analyser\Scanner;
 
 class FixCommand extends Command
 {
-    protected $signature = 'stackshield:fix
+    protected $signature = 'stackshield:analyse-fix
         {--check= : Only fix findings for a specific check ID}
         {--dry-run : Show what would be fixed without making changes}';
 

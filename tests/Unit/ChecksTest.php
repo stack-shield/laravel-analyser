@@ -1,17 +1,17 @@
 <?php
 
-use Stackshield\Scanner\Checks\Code\DangerousSinksCheck;
-use Stackshield\Scanner\Checks\Code\MassAssignmentCheck;
-use Stackshield\Scanner\Checks\Code\RawSqlCheck;
-use Stackshield\Scanner\Checks\Config\AppKeyCheck;
-use Stackshield\Scanner\Checks\Config\DebugModeCheck;
-use Stackshield\Scanner\Checks\Config\DevToolsProductionCheck;
-use Stackshield\Scanner\Checks\Config\SessionCookieCheck;
-use Stackshield\Scanner\Checks\Filesystem\ExposedFilesCheck;
-use Stackshield\Scanner\Checks\Routes\AuthThrottleCheck;
-use Stackshield\Scanner\Checks\Routes\CsrfExemptionCheck;
-use Stackshield\Scanner\Checks\Routes\RouteModelBindingAuthCheck;
-use Stackshield\Scanner\Context;
+use StackShield\Analyser\Checks\Code\DangerousSinksCheck;
+use StackShield\Analyser\Checks\Code\MassAssignmentCheck;
+use StackShield\Analyser\Checks\Code\RawSqlCheck;
+use StackShield\Analyser\Checks\Config\AppKeyCheck;
+use StackShield\Analyser\Checks\Config\DebugModeCheck;
+use StackShield\Analyser\Checks\Config\DevToolsProductionCheck;
+use StackShield\Analyser\Checks\Config\SessionCookieCheck;
+use StackShield\Analyser\Checks\Filesystem\ExposedFilesCheck;
+use StackShield\Analyser\Checks\Routes\AuthThrottleCheck;
+use StackShield\Analyser\Checks\Routes\CsrfExemptionCheck;
+use StackShield\Analyser\Checks\Routes\RouteModelBindingAuthCheck;
+use StackShield\Analyser\Context;
 
 function fixtureContext(): Context
 {

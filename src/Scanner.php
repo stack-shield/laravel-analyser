@@ -1,9 +1,9 @@
 <?php
 
-namespace Stackshield\Scanner;
+namespace StackShield\Analyser;
 
-use Stackshield\Scanner\Baseline\Baseline;
-use Stackshield\Scanner\Checks\Check;
+use StackShield\Analyser\Baseline\Baseline;
+use StackShield\Analyser\Checks\Check;
 
 final class Scanner
 {

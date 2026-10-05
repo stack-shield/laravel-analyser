@@ -1,6 +1,6 @@
 <?php
 
-namespace Stackshield\Scanner\Baseline;
+namespace StackShield\Analyser\Baseline;
 
 final class Fingerprint
 {

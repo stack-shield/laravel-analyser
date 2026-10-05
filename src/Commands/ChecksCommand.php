@@ -1,13 +1,13 @@
 <?php
 
-namespace Stackshield\Scanner\Commands;
+namespace StackShield\Analyser\Commands;
 
 use Illuminate\Console\Command;
-use Stackshield\Scanner\Scanner;
+use StackShield\Analyser\Scanner;
 
 class ChecksCommand extends Command
 {
-    protected $signature = 'stackshield:checks';
+    protected $signature = 'stackshield:analyse-checks';
 
     protected $description = 'List all registered checks';
 

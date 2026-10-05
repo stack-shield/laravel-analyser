@@ -1,6 +1,6 @@
 <?php
 
-namespace Stackshield\Scanner;
+namespace StackShield\Analyser;
 
 use Illuminate\Support\Collection;
 use PhpParser\Node;

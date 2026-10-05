@@ -1,8 +1,8 @@
 <?php
 
-namespace Stackshield\Scanner\Reporters;
+namespace StackShield\Analyser\Reporters;
 
-use Stackshield\Scanner\Report;
+use StackShield\Analyser\Report;
 
 interface Reporter
 {

@@ -1,6 +1,6 @@
 <?php
 
-namespace Stackshield\Scanner\Enums;
+namespace StackShield\Analyser\Enums;
 
 enum Category: string
 {
