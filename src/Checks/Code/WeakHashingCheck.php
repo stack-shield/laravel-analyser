@@ -10,21 +10,16 @@ use StackShield\Analyser\Finding;
 
 class WeakHashingCheck implements Check
 {
+    /**
+     * md5($password) alone is not proof: APR1 htpasswd hashing and breach
+     * lookups need MD5 or SHA-1 by design. The finding is a weak hash becoming
+     * the stored password or the value a password is checked against.
+     */
     private const PATTERNS = [
-        '/\bmd5\s*\(\s*\$password/i' => 'md5() used for password hashing',
-        '/\bsha1\s*\(\s*\$password/i' => 'sha1() used for password hashing',
-        '/\bmd5\s*\(\s*\$passwd/i' => 'md5() used for password hashing',
-        '/\bsha1\s*\(\s*\$passwd/i' => 'sha1() used for password hashing',
-        '/\bmd5\s*\(\s*\$pwd/i' => 'md5() used for password hashing',
-        '/\bsha1\s*\(\s*\$pwd/i' => 'sha1() used for password hashing',
-        '/\bmd5\s*\(\s*\$secret/i' => 'md5() used for secret hashing',
-        '/\bsha1\s*\(\s*\$secret/i' => 'sha1() used for secret hashing',
         '/[\'"]password[\'"]\s*=>\s*md5\s*\(/i' => 'md5() assigned to password field',
         '/[\'"]password[\'"]\s*=>\s*sha1\s*\(/i' => 'sha1() assigned to password field',
-        '/md5\s*\([^)]+\)\s*={2,3}\s*/' => 'md5() hash comparison (potential password verification)',
-        '/sha1\s*\([^)]+\)\s*={2,3}\s*/' => 'sha1() hash comparison (potential password verification)',
-        '/===?\s*md5\s*\(/' => 'Comparison against md5() hash',
-        '/===?\s*sha1\s*\(/' => 'Comparison against sha1() hash',
+        '/->password\s*={1,3}\s*(?:md5|sha1)\s*\(/i' => 'md5() or sha1() used for a stored password',
+        '/(?:md5|sha1)\s*\([^)]*\)\s*={2,3}\s*\$\w+->password\b/i' => 'md5() or sha1() used to verify a password',
     ];
 
     public function id(): string
@@ -49,7 +44,7 @@ class WeakHashingCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -57,6 +52,11 @@ class WeakHashingCheck implements Check
         foreach ($ctx->phpFiles('app') as $file) {
             $contents = $ctx->fileContents($file);
             if ($contents === null) {
+                continue;
+            }
+
+            // Have I Been Pwned's range API takes a SHA-1 prefix by design.
+            if (preg_match('/pwnedpasswords|haveibeenpwned/i', $contents)) {
                 continue;
             }
 

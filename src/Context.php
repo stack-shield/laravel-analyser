@@ -23,6 +23,9 @@ final class Context
 
     private ?array $envCache = null;
 
+    /** @var string[] Relative paths of files that could not be parsed. */
+    private array $unparseable = [];
+
     private ?array $composerLockCache = null;
 
     private ?array $composerJsonCache = null;
@@ -50,13 +53,28 @@ final class Context
         }
 
         $code = file_get_contents($absolutePath);
-        $stmts = $this->parser->parse($code) ?? [];
+
+        // One file that does not parse (a stub, a template, newer syntax than
+        // the parser knows) must not abort the whole scan.
+        try {
+            $stmts = $this->parser->parse($code) ?? [];
+        } catch (\PhpParser\Error) {
+            $this->unparseable[] = $this->relativize($absolutePath);
+
+            return $this->astCache[$absolutePath] = [];
+        }
 
         $traverser = new NodeTraverser;
         $traverser->addVisitor(new NameResolver);
         $stmts = $traverser->traverse($stmts);
 
         return $this->astCache[$absolutePath] = $stmts;
+    }
+
+    /** @return string[] */
+    public function unparseableFiles(): array
+    {
+        return array_values(array_unique($this->unparseable));
     }
 
     /** @return iterable<string> Relative paths */

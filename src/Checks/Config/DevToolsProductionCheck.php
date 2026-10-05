@@ -11,8 +11,6 @@ use StackShield\Analyser\Finding;
 class DevToolsProductionCheck implements Check
 {
     private const DEV_PACKAGES = [
-        'laravel/telescope' => 'Telescope',
-        'laravel/horizon' => 'Horizon',
         'barryvdh/laravel-debugbar' => 'Debugbar',
         'beyondcode/laravel-dump-server' => 'Dump Server',
         'facade/ignition' => 'Ignition',
@@ -31,7 +29,7 @@ class DevToolsProductionCheck implements Check
 
     public function severity(): Severity
     {
-        return Severity::High;
+        return Severity::Medium;
     }
 
     public function category(): Category
@@ -41,7 +39,7 @@ class DevToolsProductionCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable

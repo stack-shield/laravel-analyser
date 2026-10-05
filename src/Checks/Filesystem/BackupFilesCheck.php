@@ -16,9 +16,10 @@ class BackupFilesCheck implements Check
         'sql' => 'SQL dump file may contain database schema and data',
         'sql.gz' => 'Compressed SQL dump may contain database schema and data',
         'bak' => 'Backup file may contain sensitive application data',
-        'tar.gz' => 'Archive file may contain application source code or data',
-        'zip' => 'Archive file may contain application source code or data',
     ];
+
+    /** Archives are only flagged when named like a backup: icon packs and downloads are fine. */
+    private const BACKUP_ARCHIVE = '/(?:backup|dump|database|\bdb\b|site|www|public_html|htdocs|source).*\.(?:zip|tar\.gz|tgz|tar)$/i';
 
     private const DANGEROUS_FILENAMES = [
         'database.sqlite' => 'SQLite database file contains application data',
@@ -46,7 +47,7 @@ class BackupFilesCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -88,8 +89,12 @@ class BackupFilesCheck implements Check
             }
 
             // Check for dangerous extensions (including compound extensions like .sql.gz, .tar.gz)
-            foreach (self::DANGEROUS_EXTENSIONS as $ext => $description) {
-                if (str_ends_with(strtolower($filename), '.'.$ext)) {
+            $archive = preg_match(self::BACKUP_ARCHIVE, $filename)
+                ? ['archive' => 'Archive named like a backup may contain application source code or data']
+                : [];
+
+            foreach (self::DANGEROUS_EXTENSIONS + $archive as $ext => $description) {
+                if ($ext === 'archive' || str_ends_with(strtolower($filename), '.'.$ext)) {
                     yield new Finding(
                         checkId: $this->id(),
                         checkName: $this->name(),

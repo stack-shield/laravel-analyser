@@ -32,7 +32,7 @@ class CorsConfigCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -42,21 +42,8 @@ class CorsConfigCheck implements Check
             return;
         }
 
-        // Check for wildcard allowed_origins
-        if (preg_match("/['\"]allowed_origins['\"]\\s*=>\\s*\\[\\s*['\"]\\*['\"]/", $corsConfig)) {
-            yield new Finding(
-                checkId: $this->id(),
-                checkName: $this->name(),
-                checkVersion: $this->version(),
-                severity: $this->severity(),
-                category: $this->category(),
-                message: "CORS allowed_origins is set to '*'. Any domain can make cross-origin requests to your API.",
-                file: 'config/cors.php',
-                symbol: 'cors.allowed_origins',
-                remediation: 'Restrict allowed_origins to specific trusted domains instead of using wildcard.',
-            );
-        }
-
+        // allowed_origins ['*'] alone is Laravel's default and safe: without
+        // credentials, a cross-origin caller only gets what anyone could fetch.
         // Check supports_credentials with wildcard origins
         if (preg_match("/['\"]supports_credentials['\"]\\s*=>\\s*true/", $corsConfig)
             && preg_match("/['\"]allowed_origins['\"]\\s*=>\\s*\\[\\s*['\"]\\*['\"]/", $corsConfig)) {

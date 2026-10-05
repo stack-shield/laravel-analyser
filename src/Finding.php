@@ -21,12 +21,22 @@ final class Finding
         public readonly ?string $symbol = null,
         public readonly ?string $snippet = null,
         public readonly ?string $remediation = null,
+        public readonly bool $advisory = false,
     ) {
         $this->fingerprint = Baseline\Fingerprint::generate(
             $this->checkId,
             $this->file,
             $this->symbol,
             $this->snippet,
+        );
+    }
+
+    public function asAdvisory(): self
+    {
+        return new self(
+            $this->checkId, $this->checkName, $this->checkVersion, $this->severity,
+            $this->category, $this->message, $this->file, $this->line,
+            $this->symbol, $this->snippet, $this->remediation, advisory: true,
         );
     }
 
@@ -45,6 +55,7 @@ final class Finding
             'snippet' => $this->snippet,
             'fingerprint' => $this->fingerprint,
             'remediation' => $this->remediation,
+            'advisory' => $this->advisory,
         ];
     }
 }

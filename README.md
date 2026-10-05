@@ -1,6 +1,8 @@
-# Stackshield Scanner
+# StackShield Laravel Analyser
 
-A Laravel-aware static application security testing (SAST) tool. Scans your Laravel project for security vulnerabilities and misconfigurations.
+A Laravel-aware static application security testing (SAST) tool. Scans your Laravel project's source for security vulnerabilities and misconfigurations.
+
+This is the static analyser behind StackShield's open source monitoring. For checks against a booted application at runtime, see [stackshield/scanner](https://github.com/stack-shield/scanner).
 
 ## Installation
 
@@ -35,24 +37,24 @@ php artisan stackshield:analyse-fix
 
 ## Checks
 
-Stackshield Scanner includes 40 security checks across 5 categories:
+The analyser includes 39 security checks across 5 categories. Checks marked *advisory* are heuristics static analysis cannot confirm (middleware applied elsewhere, validation in a form request): their findings are reported but do not count toward the grade.
 
 ### Code Analysis
 | ID | Check | Severity |
 |----|-------|----------|
-| SS001 | Mass Assignment (missing $fillable/$guarded) | High |
+| SS001 | Mass assignment: unvalidated request data reaching unguarded models, forceFill or forceCreate | High |
 | SS002 | Raw SQL with tainted input | Critical |
 | SS003 | Dangerous sinks (eval, shell_exec) with user input | Critical |
-| SS007 | Unvalidated request input in controllers | Medium |
+| SS007 | Unvalidated request input in controllers (advisory) | Medium |
 | SS008 | Hardcoded credentials in source code | High |
-| SS009 | File upload without validation | High |
+| SS009 | File upload without validation (advisory) | High |
 | SS040 | Insecure random number generation | Medium |
 | SS041 | Open redirect via user input | High |
 | SS042 | Weak hashing (md5/sha1 for passwords) | High |
 | SS043 | Unsafe deserialization | Critical |
-| SS044 | Blade raw output ({!! !!}) | Medium |
-| SS053 | Missing authorization in controllers | Medium |
-| SS054 | Mass delete without constraints | Medium |
+| SS044 | Blade raw output ({!! !!}) of request data (named variables are advisory) | Medium |
+| SS053 | Missing authorization in controllers (advisory) | Medium |
+| SS054 | Mass delete without constraints (advisory) | Medium |
 
 ### Configuration
 | ID | Check | Severity |
@@ -60,25 +62,25 @@ Stackshield Scanner includes 40 security checks across 5 categories:
 | SS010 | APP_KEY missing, short, or committed | Critical |
 | SS011 | Weak encryption cipher | Medium |
 | SS012 | Debug mode enabled in production | High |
-| SS013 | Dev tools (Telescope/Debugbar) in production | Medium |
+| SS013 | Debug tools (Debugbar, Ignition, dump server) in production require | Medium |
 | SS014 | Debug log level in production | Low |
 | SS015 | Insecure session cookie settings | Medium |
 | SS016 | Wildcard CORS configuration | Medium |
 | SS017 | Mail driver set to log/array in production | Low |
-| SS045 | Trusted proxies set to wildcard | Medium |
+| SS045 | Trusted proxies set to wildcard (advisory) | Medium |
 | SS046 | Broadcasting channels without auth | Medium |
 | SS047 | Queue connection sync in production | Medium |
 | SS048 | File cache driver in production | Low |
-| SS049 | Missing HTTPS enforcement | Medium |
+| SS049 | Missing HTTPS enforcement (advisory) | Medium |
 
 ### Routes
 | ID | Check | Severity |
 |----|-------|----------|
 | SS004 | Auth routes without rate limiting | Medium |
-| SS005 | Route model binding without auth | Medium |
-| SS006 | CSRF exemptions on state-changing routes | High |
+| SS005 | Route model binding without auth (advisory) | Medium |
+| SS006 | CSRF exemptions (only a blanket `*` exemption is graded) | High |
 | SS050 | API routes without rate limiting | Medium |
-| SS051 | Debug/test routes in production | High |
+| SS051 | Debug/test routes in production (advisory) | High |
 | SS052 | Overly broad wildcard routes | Low |
 
 ### Filesystem
@@ -93,13 +95,12 @@ Stackshield Scanner includes 40 security checks across 5 categories:
 ### Dependencies
 | ID | Check | Severity |
 |----|-------|----------|
-| SS030 | Known security advisories | High |
+| SS030 | Known security advisories in composer.lock (Packagist advisory database; makes one network request, skipped with `offline: true`) | From the advisory |
 | SS055 | Outdated Laravel version | Medium |
-| SS056 | Known-insecure package versions | High |
 
 ## Grading
 
-Reports include a letter grade based on findings:
+Reports include a letter grade based on graded (non-advisory) findings:
 
 | Grade | Criteria |
 |-------|----------|
@@ -181,15 +182,15 @@ php artisan stackshield:analyse-fix --dry-run
 php artisan stackshield:analyse-fix
 
 # Fix only a specific check
-php artisan stackshield:analyse-fix --check=SS001
+php artisan stackshield:analyse-fix --check=SS012
 ```
 
-Currently auto-fixable: SS001 (add $fillable), SS012 (disable debug mode).
+Currently auto-fixable: SS012 (disable debug mode).
 
 ## Requirements
 
 - PHP 8.2+
-- Laravel 10, 11, or 12
+- Laravel 10, 11, 12 or 13
 
 ## License
 

@@ -32,9 +32,16 @@ class ApiRateLimitCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
+    /**
+     * Throttling is usually applied to the whole api group, not per route: in
+     * the group definition (app/Http/Kernel.php on Laravel 10, bootstrap/app.php
+     * with throttleApi() or a custom group on 11+), or by the provider that
+     * loads the route file. One unthrottled API is one finding, however many
+     * routes it has.
+     */
     public function run(Context $ctx): iterable
     {
         $file = 'routes/api.php';
@@ -44,39 +51,41 @@ class ApiRateLimitCheck implements Check
             return;
         }
 
-        // If the file contains 'throttle' anywhere (group-level or per-route), it's likely protected
-        if (str_contains($contents, 'throttle')) {
+        $routeCount = preg_match_all('/Route::(get|post|put|delete|patch|any|match|resource|apiResource)\s*\(/i', $contents);
+        if ($routeCount === 0) {
             return;
         }
 
-        // Check for route definitions without throttle middleware
-        $lines = explode("\n", $contents);
-        $routePattern = '/Route::(get|post|put|delete|patch|any|match)\s*\(/i';
-
-        $foundRoutes = false;
-        foreach ($lines as $index => $line) {
-            if (preg_match($routePattern, $line)) {
-                $foundRoutes = true;
-                $lineNum = $index + 1;
-
-                yield new Finding(
-                    checkId: $this->id(),
-                    checkName: $this->name(),
-                    checkVersion: $this->version(),
-                    severity: $this->severity(),
-                    category: $this->category(),
-                    message: 'API route defined without throttle middleware. Unthrottled API endpoints are vulnerable to brute-force and denial-of-service attacks.',
-                    file: $file,
-                    line: $lineNum,
-                    symbol: 'Route',
-                    snippet: trim($line),
-                    remediation: "Apply rate limiting via middleware: Route::middleware('throttle:api')->group(...) or add ->middleware('throttle:60,1') to individual routes.",
-                );
+        foreach ($this->throttleSources($ctx) as $source) {
+            if (preg_match('/throttle/i', $ctx->fileContents($source) ?? '')) {
+                return;
             }
         }
 
-        if (! $foundRoutes) {
-            return;
+        yield new Finding(
+            checkId: $this->id(),
+            checkName: $this->name(),
+            checkVersion: $this->version(),
+            severity: $this->severity(),
+            category: $this->category(),
+            message: "No rate limiting found for the {$routeCount} routes in routes/api.php: neither the routes nor the api middleware group apply throttle middleware. Unthrottled API endpoints are open to brute-force and denial-of-service attacks.",
+            file: $file,
+            symbol: 'api',
+            remediation: "Throttle the api group: \$middleware->throttleApi() in bootstrap/app.php (Laravel 11+), 'throttle:api' in the api group of app/Http/Kernel.php (Laravel 10), or Route::middleware('throttle:api')->group(...) in routes/api.php.",
+        );
+    }
+
+    /** @return string[] Files where the api group or its routes may be throttled. */
+    private function throttleSources(Context $ctx): array
+    {
+        $sources = ['routes/api.php', 'app/Http/Kernel.php', 'bootstrap/app.php'];
+
+        foreach ($ctx->phpFiles('app/Providers') as $provider) {
+            if (str_contains($ctx->fileContents($provider) ?? '', 'api.php')) {
+                $sources[] = $provider;
+            }
         }
+
+        return $sources;
     }
 }

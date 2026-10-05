@@ -32,7 +32,7 @@ class UnsafeDeserializationCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -51,7 +51,8 @@ class UnsafeDeserializationCheck implements Check
                     continue;
                 }
 
-                if (! preg_match('/\bunserialize\s*\(/', $line)) {
+                // PHP's unserialize(), not a method or declaration of that name.
+                if (! preg_match('/(?<![\w$>:])unserialize\s*\(/', $line) || preg_match('/function\s+unserialize\s*\(/', $line)) {
                     continue;
                 }
 
@@ -90,6 +91,9 @@ class UnsafeDeserializationCheck implements Check
                         symbol: 'unserialize',
                         snippet: trim($line),
                         remediation: "Use unserialize(\$data, ['allowed_classes' => false]) or specify an explicit list of allowed classes. Prefer json_decode() when possible.",
+                        // Without a request source in sight, the data may well be
+                        // trusted (queue payloads, the app's own cache).
+                        advisory: true,
                     );
                 }
             }

@@ -2,8 +2,6 @@
 
 namespace StackShield\Analyser\Checks\Code;
 
-use PhpParser\Node;
-use PhpParser\NodeFinder;
 use StackShield\Analyser\Checks\Check;
 use StackShield\Analyser\Context;
 use StackShield\Analyser\Enums\Category;
@@ -12,6 +10,13 @@ use StackShield\Analyser\Finding;
 
 class MassAssignmentCheck implements Check
 {
+    /**
+     * create($request->all()), ->update(request()->except([...])),
+     * forceFill(Request::input()) and similar: a whole request array, not a
+     * single field or a validated subset.
+     */
+    private const RAW_REQUEST_CALL = '/(?<receiver>\$this->|->|::)(?<method>create|fill|update|forceFill|forceCreate|firstOrCreate|updateOrCreate)\(\s*(?<lead>[^()]*,\s*)?(?:\$request->|request\(\)->|Request::)(?:(?:all|input|post)\(\s*\)|except\()/';
+
     public function id(): string
     {
         return 'SS001';
@@ -34,78 +39,92 @@ class MassAssignmentCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
+    /**
+     * Eloquent guards every attribute by default, so a model without $fillable
+     * or $guarded is safe: mass assignment throws. The vulnerability is
+     * unvalidated request data reaching a mass-assignment call when guarding is
+     * off ($guarded = [] or a global Model::unguard()), or reaching forceFill()
+     * and forceCreate(), which ignore guarding altogether.
+     */
     public function run(Context $ctx): iterable
     {
-        $nodeFinder = new NodeFinder;
+        $unguarded = $this->unguardedModels($ctx);
+        $globallyUnguarded = $this->globallyUnguarded($ctx);
 
-        foreach ($ctx->phpFiles('app/Models') as $file) {
-            $stmts = $ctx->ast($file);
-            if (empty($stmts)) {
+        foreach ($ctx->phpFiles('app') as $file) {
+            $contents = $ctx->fileContents($file) ?? '';
+
+            if (! preg_match_all(self::RAW_REQUEST_CALL, $contents, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
                 continue;
             }
 
-            $classes = $nodeFinder->findInstanceOf($stmts, Node\Stmt\Class_::class);
+            foreach ($matches as $match) {
+                $method = $match['method'][0];
 
-            foreach ($classes as $class) {
-                if (! $this->extendsModel($class)) {
+                // $this->create($request->all()) is the controller's own helper (the
+                // classic RegisterController), and only *OrCreate takes the data as a
+                // second argument; anything else with a leading argument is not Eloquent.
+                if ($match['receiver'][0] === '$this->'
+                    || (($match['lead'][0] ?? '') !== '' && ! in_array($method, ['firstOrCreate', 'updateOrCreate'], true))) {
+                    continue;
+                }
+                $bypassesGuarding = in_array($method, ['forceFill', 'forceCreate'], true);
+
+                if (! $bypassesGuarding && ! $globallyUnguarded && $unguarded === []) {
                     continue;
                 }
 
-                $hasFillable = false;
-                $hasGuarded = false;
+                $line = substr_count(substr($contents, 0, $match[0][1]), "\n") + 1;
+                $why = $bypassesGuarding
+                    ? "{$method}() ignores \$fillable and \$guarded"
+                    : ($globallyUnguarded
+                        ? 'Model::unguard() turns guarding off for every model'
+                        : 'models with $guarded = [] ('.implode(', ', array_slice($unguarded, 0, 3)).(count($unguarded) > 3 ? ', ...' : '').') accept every attribute');
 
-                foreach ($class->stmts as $stmt) {
-                    if ($stmt instanceof Node\Stmt\Property) {
-                        foreach ($stmt->props as $prop) {
-                            if ($prop->name->toString() === 'fillable') {
-                                $hasFillable = true;
-                            }
-                            if ($prop->name->toString() === 'guarded') {
-                                $hasGuarded = true;
-                            }
-                        }
-                    }
-                }
-
-                if (! $hasFillable && ! $hasGuarded) {
-                    $className = $class->namespacedName?->toString() ?? $class->name?->toString() ?? 'Unknown';
-
-                    yield new Finding(
-                        checkId: $this->id(),
-                        checkName: $this->name(),
-                        checkVersion: $this->version(),
-                        severity: $this->severity(),
-                        category: $this->category(),
-                        message: "Model {$className} has no \$fillable or \$guarded property. All attributes are mass-assignable by default.",
-                        file: $file,
-                        line: $class->getStartLine(),
-                        symbol: $className,
-                        snippet: "class {$class->name->toString()} extends Model",
-                        remediation: "Add a \$fillable array listing only the attributes that should be mass-assignable, or set \$guarded = ['*'] to guard all attributes.",
-                    );
-                }
+                yield new Finding(
+                    checkId: $this->id(),
+                    checkName: $this->name(),
+                    checkVersion: $this->version(),
+                    severity: $this->severity(),
+                    category: $this->category(),
+                    message: "Unvalidated request data is passed to {$method}(), and {$why}. A user can set any column, such as is_admin or user_id.",
+                    file: $file,
+                    line: $line,
+                    symbol: $method,
+                    snippet: trim(strtok(substr($contents, $match[0][1]), "\n")),
+                    remediation: "Pass \$request->validated() or \$request->only([...]) instead of \$request->all(), and declare \$fillable on the model.",
+                );
             }
         }
     }
 
-    private function extendsModel(Node\Stmt\Class_ $class): bool
+    /** @return string[] Short names of models declaring $guarded = []. */
+    private function unguardedModels(Context $ctx): array
     {
-        if ($class->extends === null) {
-            return false;
+        $models = [];
+
+        foreach ($ctx->phpFiles('app') as $file) {
+            $contents = $ctx->fileContents($file) ?? '';
+            if (preg_match('/\$guarded\s*=\s*(?:\[\s*\]|array\(\s*\))\s*;/', $contents)
+                && preg_match('/class\s+(\w+)/', $contents, $class)) {
+                $models[] = $class[1];
+            }
         }
 
-        $parent = $class->extends->toString();
-        $parentParts = explode('\\', $parent);
-        $shortName = end($parentParts);
+        return $models;
+    }
 
-        return in_array($parent, [
-            'Model',
-            'Illuminate\\Database\\Eloquent\\Model',
-            'Authenticatable',
-            'Illuminate\\Foundation\\Auth\\User',
-        ], true) || in_array($shortName, ['Model', 'Authenticatable'], true);
+    private function globallyUnguarded(Context $ctx): bool
+    {
+        foreach ($ctx->phpFiles('app/Providers') as $file) {
+            if (preg_match('/Model::unguard\(\s*\)/', $ctx->fileContents($file) ?? '')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

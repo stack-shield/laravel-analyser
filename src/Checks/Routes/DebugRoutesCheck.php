@@ -2,21 +2,38 @@
 
 namespace StackShield\Analyser\Checks\Routes;
 
+use StackShield\Analyser\Checks\Advisory;
 use StackShield\Analyser\Checks\Check;
 use StackShield\Analyser\Context;
 use StackShield\Analyser\Enums\Category;
 use StackShield\Analyser\Enums\Severity;
 use StackShield\Analyser\Finding;
 
-class DebugRoutesCheck implements Check
+class DebugRoutesCheck implements Advisory, Check
 {
-    private const DEBUG_PATTERNS = [
-        '/test' => 'Test route that may expose application internals',
-        '/debug' => 'Debug route that may leak sensitive information',
-        '/phpinfo' => 'phpinfo() route exposes full PHP configuration and environment variables',
-        '/info' => 'Info route that may expose application details',
-        'telescope' => 'Laravel Telescope route should not be accessible in production',
-    ];
+    /**
+     * Whole-route debug endpoints. Features named "test" (send a test email,
+     * test a webhook, {rule}/test) are not debug routes, so the URI has to be
+     * a debug endpoint itself.
+     */
+    private function debugRoute(string $line): ?string
+    {
+        if (str_contains($line, 'phpinfo(')) {
+            return 'The route calls phpinfo(), which exposes the full PHP configuration and environment variables';
+        }
+        if (! preg_match('/Route::\w+\(\s*[\'"]([^\'"]*)[\'"]/', $line, $m)) {
+            return null;
+        }
+        $segments = explode('/', strtolower(trim($m[1], '/')));
+        if (in_array('phpinfo', $segments, true)) {
+            return 'A phpinfo route exposes the full PHP configuration and environment variables';
+        }
+        if (in_array($segments[0], ['debug', '_debug', 'test', 'tests', 'dump'], true)) {
+            return "The '{$m[1]}' route looks like a leftover debug or test endpoint that may expose application internals";
+        }
+
+        return null;
+    }
 
     public function id(): string
     {
@@ -40,7 +57,7 @@ class DebugRoutesCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -62,27 +79,24 @@ class DebugRoutesCheck implements Check
                     continue;
                 }
 
-                foreach (self::DEBUG_PATTERNS as $pattern => $description) {
-                    if (stripos($line, $pattern) !== false && preg_match('/Route::/', $line)) {
-                        $lineNum = $index + 1;
-
-                        yield new Finding(
-                            checkId: $this->id(),
-                            checkName: $this->name(),
-                            checkVersion: $this->version(),
-                            severity: $this->severity(),
-                            category: $this->category(),
-                            message: "Debug/test route detected containing '{$pattern}'. {$description}.",
-                            file: $file,
-                            line: $lineNum,
-                            symbol: 'Route',
-                            snippet: trim($line),
-                            remediation: 'Remove debug and test routes before deploying to production, or wrap them in an environment check: if (app()->environment(\'local\')) { ... }',
-                        );
-
-                        break; // One finding per line
-                    }
+                $description = $this->debugRoute($line);
+                if ($description === null) {
+                    continue;
                 }
+
+                yield new Finding(
+                    checkId: $this->id(),
+                    checkName: $this->name(),
+                    checkVersion: $this->version(),
+                    severity: $this->severity(),
+                    category: $this->category(),
+                    message: "Debug route detected. {$description}.",
+                    file: $file,
+                    line: $index + 1,
+                    symbol: 'Route',
+                    snippet: trim($line),
+                    remediation: 'Remove debug and test routes before deploying to production, or wrap them in an environment check: if (app()->environment(\'local\')) { ... }',
+                );
             }
         }
     }

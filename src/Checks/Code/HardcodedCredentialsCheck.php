@@ -41,7 +41,7 @@ class HardcodedCredentialsCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -74,8 +74,13 @@ class HardcodedCredentialsCheck implements Check
                         continue;
                     }
 
+                    // Enum cases name things; they do not hold secrets.
+                    if (str_starts_with($trimmed, 'case ')) {
+                        continue;
+                    }
+
                     foreach (self::PATTERNS as $pattern => $description) {
-                        if (preg_match($pattern, $line, $matches)) {
+                        if (preg_match($pattern, $line, $matches) && ! $this->isPlaceholder($matches[0])) {
                             yield new Finding(
                                 checkId: $this->id(),
                                 checkName: $this->name(),
@@ -95,6 +100,25 @@ class HardcodedCredentialsCheck implements Check
                 }
             }
         }
+    }
+
+    /**
+     * The quoted value names a field, route or label rather than being a
+     * secret: 'current_password', '/forgot-password', 'database.view-password',
+     * a string built from variables, or a marker like '*** NO PASSWORD ***'.
+     */
+    private function isPlaceholder(string $match): bool
+    {
+        if (! preg_match('/["\']([^"\']*)["\']\s*$/', $match, $value)) {
+            return false;
+        }
+        $value = $value[1];
+
+        return (bool) preg_match('/pass|pwd|secret|token|key/i', $value)
+            || str_starts_with($value, '/')
+            || str_starts_with($value, '.')
+            || str_contains($value, '$')
+            || str_contains($value, '***');
     }
 
     private function redactMatch(string $match): string

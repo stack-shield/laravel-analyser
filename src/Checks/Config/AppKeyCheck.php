@@ -32,7 +32,7 @@ class AppKeyCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -48,19 +48,26 @@ class AppKeyCheck implements Check
             $env = $ctx->env($envFile);
             $appKey = $env['APP_KEY'] ?? '';
 
+            // An empty key is a template, not a weakness: Laravel refuses to
+            // encrypt anything without one.
             if ($appKey === '') {
+                continue;
+            }
+
+            // In a repository, any env file present is committed, and a real key
+            // in it is shared with everyone who can read the repo.
+            if (($ctx->config()['source'] ?? 'local') === 'repository') {
                 yield new Finding(
                     checkId: $this->id(),
                     checkName: $this->name(),
                     checkVersion: $this->version(),
-                    severity: $this->severity(),
+                    severity: Severity::Critical,
                     category: $this->category(),
-                    message: "APP_KEY is empty in {$envFile}. Without an application key, encrypted data and sessions are insecure.",
+                    message: "{$envFile} with a real APP_KEY is committed to the repository. Anyone who can read the repo can decrypt data and forge sessions for any install using this key.",
                     file: $envFile,
                     line: $this->findLine($ctx, $envFile, 'APP_KEY'),
                     symbol: 'APP_KEY',
-                    snippet: 'APP_KEY=',
-                    remediation: 'Run `php artisan key:generate` to set a secure APP_KEY.',
+                    remediation: 'Remove the env file from the repository, add it to .gitignore, and rotate APP_KEY on every install that used it.',
                 );
 
                 continue;

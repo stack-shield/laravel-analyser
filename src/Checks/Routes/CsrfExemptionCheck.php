@@ -34,7 +34,7 @@ class CsrfExemptionCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -68,6 +68,9 @@ class CsrfExemptionCheck implements Check
                             foreach ($prop->default->items as $item) {
                                 if ($item->value instanceof Node\Scalar\String_) {
                                     $exemptedUri = $item->value->value;
+                                    if ($this->isExternalCallback($exemptedUri)) {
+                                        continue;
+                                    }
 
                                     // Flag broad exemptions
                                     if ($this->isBroadExemption($exemptedUri)) {
@@ -83,6 +86,7 @@ class CsrfExemptionCheck implements Check
                                             symbol: 'VerifyCsrfToken::$except',
                                             snippet: "'{$exemptedUri}'",
                                             remediation: 'Narrow the CSRF exemption to specific webhook endpoints that genuinely need it, and verify requests using webhook signatures instead.',
+                                            advisory: ! $this->isBlanketExemption($exemptedUri),
                                         );
                                     } else {
                                         yield new Finding(
@@ -97,6 +101,7 @@ class CsrfExemptionCheck implements Check
                                             symbol: 'VerifyCsrfToken::$except',
                                             snippet: "'{$exemptedUri}'",
                                             remediation: 'If this route handles webhooks, verify requests using the provider\'s webhook signature. If it\'s a regular form endpoint, remove the CSRF exemption.',
+                                            advisory: true,
                                         );
                                     }
                                 }
@@ -115,6 +120,9 @@ class CsrfExemptionCheck implements Check
                 foreach ($matches[1] as $exceptBlock) {
                     preg_match_all("/['\"]([^'\"]+)['\"]/", $exceptBlock, $uriMatches);
                     foreach ($uriMatches[1] as $uri) {
+                        if ($this->isExternalCallback($uri)) {
+                            continue;
+                        }
                         $severity = $this->isBroadExemption($uri) ? Severity::High : $this->severity();
                         yield new Finding(
                             checkId: $this->id(),
@@ -127,11 +135,32 @@ class CsrfExemptionCheck implements Check
                             symbol: 'validateCsrfTokens',
                             snippet: $uri,
                             remediation: 'Verify requests using webhook signatures or other authentication mechanisms.',
+                            advisory: ! $this->isBlanketExemption($uri),
                         );
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Endpoints called by other servers (payment webhooks, OAuth and SAML
+     * callbacks, health checks) cannot send a CSRF token; exempting them is
+     * correct.
+     */
+    private function isExternalCallback(string $uri): bool
+    {
+        return (bool) preg_match('/webhook|hook|stripe|paypal|mollie|paddle|braintree|ipn|callback|oauth|saml|sso|notify|health|cron|pusher|broadcasting/i', $uri);
+    }
+
+    /**
+     * Only an exemption covering every route is graded. A wildcard over one
+     * area ('remote/*', '/dav/*') usually serves a non-browser client
+     * authenticated another way, which static analysis cannot confirm.
+     */
+    private function isBlanketExemption(string $uri): bool
+    {
+        return trim($uri, '/ ') === '*';
     }
 
     private function isBroadExemption(string $uri): bool

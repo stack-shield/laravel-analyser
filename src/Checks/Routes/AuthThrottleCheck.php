@@ -12,11 +12,21 @@ use StackShield\Analyser\Finding;
 
 class AuthThrottleCheck implements Check
 {
+    /**
+     * Endpoints that accept a guessable secret or send mail on request. Routes
+     * such as register or email/verify/{id}/{hash} (a signed link) are not
+     * brute-force targets.
+     */
     private const AUTH_PATTERNS = [
         'login', 'signin', 'sign-in',
-        'register', 'signup', 'sign-up',
-        'password/reset', 'password/email', 'forgot-password',
-        'two-factor', '2fa', 'verify',
+        'password/reset', 'password/email', 'forgot-password', 'reset-password',
+        'two-factor', '2fa', 'mfa', 'otp',
+    ];
+
+    /** Signs that an app throttles login attempts in code rather than route middleware. */
+    private const CODE_THROTTLE_SIGNALS = [
+        'ThrottlesLogins', 'ensureIsNotRateLimited', 'RateLimiter::tooManyAttempts',
+        'RateLimiter::attempt', 'RateLimiter::hit', "->middleware('throttle", '->middleware("throttle',
     ];
 
     public function id(): string
@@ -41,13 +51,13 @@ class AuthThrottleCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
     {
-        // Parse route files for auth-like routes without throttle middleware
         $routeFiles = ['routes/web.php', 'routes/auth.php', 'routes/api.php'];
+        $throttledInCode = $this->throttlesInCode($ctx);
 
         foreach ($routeFiles as $routeFile) {
             $stmts = $ctx->ast($routeFile);
@@ -60,33 +70,120 @@ class AuthThrottleCheck implements Check
             $staticCalls = $nodeFinder->findInstanceOf($stmts, Node\Expr\StaticCall::class);
 
             $routeCalls = $this->findRouteCalls($methodCalls, $staticCalls);
+            $inThrottledGroup = $this->routesInThrottledGroups($methodCalls);
 
             foreach ($routeCalls as $routeCall) {
                 $uri = $this->extractUri($routeCall);
-                if ($uri === null) {
+                if ($uri === null || ! $this->isAuthRoute($uri)) {
                     continue;
                 }
 
-                if (! $this->isAuthRoute($uri)) {
+                if ($throttledInCode
+                    || isset($inThrottledGroup[spl_object_id($routeCall)])
+                    || $this->hasThrottleMiddleware($routeCall, $stmts)) {
                     continue;
                 }
 
-                if (! $this->hasThrottleMiddleware($routeCall, $stmts)) {
-                    yield new Finding(
-                        checkId: $this->id(),
-                        checkName: $this->name(),
-                        checkVersion: $this->version(),
-                        severity: $this->severity(),
-                        category: $this->category(),
-                        message: "Auth route '{$uri}' does not have throttle middleware. This makes it vulnerable to brute force attacks.",
-                        file: $routeFile,
-                        line: $routeCall->getStartLine(),
-                        symbol: $uri,
-                        remediation: "Add throttle middleware: ->middleware('throttle:5,1')",
-                    );
+                yield new Finding(
+                    checkId: $this->id(),
+                    checkName: $this->name(),
+                    checkVersion: $this->version(),
+                    severity: $this->severity(),
+                    category: $this->category(),
+                    message: "Auth route '{$uri}' accepts submissions without rate limiting: no throttle middleware on the route or its group, and no throttling in the login code. It is open to brute-force attacks.",
+                    file: $routeFile,
+                    line: $routeCall->getStartLine(),
+                    symbol: $uri,
+                    remediation: "Add throttle middleware: ->middleware('throttle:5,1'), or rate limit in the controller with RateLimiter::tooManyAttempts().",
+                );
+            }
+        }
+    }
+
+    /**
+     * Breeze and Jetstream throttle in LoginRequest, Fortify through its login
+     * limiter, older apps through ThrottlesLogins or controller middleware.
+     */
+    private function throttlesInCode(Context $ctx): bool
+    {
+        $require = $ctx->composerJson()['require'] ?? [];
+        if (isset($require['laravel/fortify']) || isset($require['laravel/jetstream'])) {
+            return true;
+        }
+
+        foreach ($ctx->phpFiles('app') as $file) {
+            $contents = $ctx->fileContents($file) ?? '';
+            foreach (self::CODE_THROTTLE_SIGNALS as $signal) {
+                if (str_contains($contents, $signal)) {
+                    return true;
                 }
             }
         }
+
+        return false;
+    }
+
+    /**
+     * Route calls declared inside ->group(...) of a chain that applies
+     * throttle middleware, keyed by spl_object_id.
+     *
+     * @param  Node\Expr\MethodCall[]  $methodCalls
+     * @return array<int, true>
+     */
+    private function routesInThrottledGroups(array $methodCalls): array
+    {
+        $protected = [];
+        $nodeFinder = new NodeFinder;
+
+        foreach ($methodCalls as $call) {
+            if (! $call->name instanceof Node\Identifier || $call->name->toString() !== 'group') {
+                continue;
+            }
+            if (! $this->chainAppliesThrottle($call->var)) {
+                continue;
+            }
+
+            foreach ($call->args as $arg) {
+                foreach ($nodeFinder->findInstanceOf($arg, Node\Expr\StaticCall::class) as $inner) {
+                    $protected[spl_object_id($inner)] = true;
+                }
+            }
+        }
+
+        return $protected;
+    }
+
+    private function chainAppliesThrottle(Node\Expr $node): bool
+    {
+        while ($node instanceof Node\Expr\MethodCall || $node instanceof Node\Expr\StaticCall) {
+            $name = $node->name instanceof Node\Identifier ? $node->name->toString() : null;
+            if ($name === 'middleware' && $this->argsMentionThrottle($node->args)) {
+                return true;
+            }
+            if ($node instanceof Node\Expr\StaticCall) {
+                break;
+            }
+            $node = $node->var;
+        }
+
+        return false;
+    }
+
+    private function argsMentionThrottle(array $args): bool
+    {
+        foreach ($args as $arg) {
+            $value = $arg->value ?? null;
+            $strings = $value instanceof Node\Expr\Array_
+                ? array_map(fn ($item) => $item?->value, $value->items)
+                : [$value];
+            foreach ($strings as $string) {
+                if ($string instanceof Node\Scalar\String_ && str_starts_with($string->value, 'throttle')) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private function findRouteCalls(array $methodCalls, array $staticCalls): array
@@ -102,7 +199,7 @@ class AuthThrottleCheck implements Check
                 continue;
             }
             $method = $call->name instanceof Node\Identifier ? $call->name->toString() : null;
-            if (in_array($method, ['post', 'put', 'patch', 'get', 'any'], true)) {
+            if (in_array($method, ['post', 'put', 'patch', 'any'], true)) {
                 $routes[] = $call;
             }
         }

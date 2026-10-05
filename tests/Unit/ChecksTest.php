@@ -18,6 +18,18 @@ function fixtureContext(): Context
     return new Context(__DIR__.'/../Fixtures/laravel-app');
 }
 
+/** A throwaway app built from relative path => contents. */
+function tempApp(array $files): Context
+{
+    $base = sys_get_temp_dir().'/analyser-'.bin2hex(random_bytes(6));
+    foreach ($files as $path => $contents) {
+        @mkdir(dirname("$base/$path"), 0777, true);
+        file_put_contents("$base/$path", $contents);
+    }
+
+    return new Context($base);
+}
+
 // SS012: Debug Mode
 it('detects APP_DEBUG=true in production env', function () {
     $check = new DebugModeCheck;
@@ -39,13 +51,18 @@ it('detects short APP_KEY', function () {
 });
 
 // SS013: Dev Tools
-it('detects dev tools in production require', function () {
-    $check = new DevToolsProductionCheck;
-    $findings = iterator_to_array($check->run(fixtureContext()));
+it('detects debug tools in production require', function () {
+    $ctx = tempApp(['composer.json' => json_encode(['require' => ['barryvdh/laravel-debugbar' => '^3.0']])]);
 
-    expect($findings)->not->toBeEmpty();
-    $telescopeFindings = array_filter($findings, fn ($f) => str_contains($f->message, 'Telescope'));
-    expect($telescopeFindings)->not->toBeEmpty();
+    $findings = iterator_to_array((new DevToolsProductionCheck)->run($ctx));
+
+    expect($findings)->toHaveCount(1);
+    expect($findings[0]->message)->toContain('Debugbar');
+});
+
+it('does not treat gated production dashboards as dev tools', function () {
+    // The fixture requires Telescope in production, which ships behind a gate.
+    expect(iterator_to_array((new DevToolsProductionCheck)->run(fixtureContext())))->toBeEmpty();
 });
 
 // SS015: Session Cookie
@@ -58,18 +75,34 @@ it('detects insecure session cookie settings', function () {
 });
 
 // SS001: Mass Assignment
-it('detects models without fillable or guarded', function () {
-    $check = new MassAssignmentCheck;
-    $findings = iterator_to_array($check->run(fixtureContext()));
+it('does not flag models that rely on Eloquent default guarding', function () {
+    $ctx = tempApp([
+        'app/Models/Post.php' => '<?php class Post extends Model {}',
+        'app/Http/Controllers/PostController.php' => '<?php class PostController { function store($request) { return Post::create($request->all()); } }',
+    ]);
 
-    expect($findings)->not->toBeEmpty();
-    // Post model has no $fillable/$guarded
-    $postFindings = array_filter($findings, fn ($f) => str_contains($f->message, 'Post'));
-    expect($postFindings)->not->toBeEmpty();
+    expect(iterator_to_array((new MassAssignmentCheck)->run($ctx)))->toBeEmpty();
+});
 
-    // User model has $fillable - should not be flagged
-    $userFindings = array_filter($findings, fn ($f) => str_contains($f->message, 'User'));
-    expect($userFindings)->toBeEmpty();
+it('flags raw request data reaching an unguarded model', function () {
+    $ctx = tempApp([
+        'app/Models/Post.php' => '<?php class Post extends Model { protected $guarded = []; }',
+        'app/Http/Controllers/PostController.php' => "<?php class PostController {\n function store(\$request) {\n return Post::create(\$request->all());\n }\n function update(\$request, \$post) { \$post->update(\$request->validated()); } }",
+    ]);
+
+    $findings = iterator_to_array((new MassAssignmentCheck)->run($ctx));
+
+    expect($findings)->toHaveCount(1);
+    expect($findings[0]->line)->toBe(3);
+    expect($findings[0]->message)->toContain('Post');
+});
+
+it('flags forceFill with raw request data even when models are guarded', function () {
+    $ctx = tempApp([
+        'app/Http/Controllers/UserController.php' => '<?php class UserController { function update($user) { $user->forceFill(request()->all())->save(); } }',
+    ]);
+
+    expect(iterator_to_array((new MassAssignmentCheck)->run($ctx)))->toHaveCount(1);
 });
 
 // SS020: Exposed Files
@@ -132,4 +165,73 @@ it('detects dangerous function calls with tainted input', function () {
     $shellFindings = array_filter($findings, fn ($f) => str_contains($f->message, 'shell_exec'));
     expect($evalFindings)->not->toBeEmpty();
     expect($shellFindings)->not->toBeEmpty();
+});
+
+// SS050: throttling applied to the api group counts
+it('accepts api throttling configured in bootstrap/app.php', function () {
+    $ctx = tempApp([
+        'routes/api.php' => "<?php Route::get('/users', fn () => 1);",
+        'bootstrap/app.php' => '<?php return Application::configure()->withMiddleware(function ($middleware) { $middleware->throttleApi(); });',
+    ]);
+
+    expect(iterator_to_array((new \StackShield\Analyser\Checks\Routes\ApiRateLimitCheck)->run($ctx)))->toBeEmpty();
+});
+
+it('reports an unthrottled api once, not per route', function () {
+    $ctx = tempApp(['routes/api.php' => "<?php Route::get('/a', fn () => 1);\nRoute::post('/b', fn () => 1);"]);
+
+    expect(iterator_to_array((new \StackShield\Analyser\Checks\Routes\ApiRateLimitCheck)->run($ctx)))->toHaveCount(1);
+});
+
+// SS004: group middleware and throttling in code count
+it('accepts auth routes inside a throttled group', function () {
+    $ctx = tempApp(['routes/web.php' => "<?php Route::middleware('throttle:6,1')->group(function () { Route::post('login', [LoginController::class, 'store']); });"]);
+
+    expect(iterator_to_array((new AuthThrottleCheck)->run($ctx)))->toBeEmpty();
+});
+
+it('accepts login throttled in a Breeze-style LoginRequest', function () {
+    $ctx = tempApp([
+        'routes/auth.php' => "<?php Route::post('login', [AuthenticatedSessionController::class, 'store']);",
+        'app/Http/Requests/Auth/LoginRequest.php' => '<?php class LoginRequest { public function authenticate() { $this->ensureIsNotRateLimited(); } }',
+    ]);
+
+    expect(iterator_to_array((new AuthThrottleCheck)->run($ctx)))->toBeEmpty();
+});
+
+// SS044: literal-only expressions and request data
+it('ignores raw output that can only render string literals', function () {
+    $ctx = tempApp(['resources/views/nav.blade.php' => "<li{!! request()->is('users*') ? ' class=\"active\"' : '' !!}>"]);
+
+    expect(iterator_to_array((new \StackShield\Analyser\Checks\Code\BladeRawOutputCheck)->run($ctx)))->toBeEmpty();
+});
+
+it('grades raw output of request data and marks named variables advisory', function () {
+    $ctx = tempApp(['resources/views/search.blade.php' => "{!! request('q') !!}\n{!! \$content !!}"]);
+
+    $findings = iterator_to_array((new \StackShield\Analyser\Checks\Code\BladeRawOutputCheck)->run($ctx), false);
+
+    expect($findings)->toHaveCount(2);
+    expect($findings[0]->advisory)->toBeFalse();
+    expect($findings[1]->advisory)->toBeTrue();
+});
+
+// SS006: external callbacks are not findings
+it('does not flag CSRF exemptions for webhooks', function () {
+    $ctx = tempApp(['bootstrap/app.php' => "<?php \$middleware->validateCsrfTokens(except: ['stripe/*', 'webhooks/github']);"]);
+
+    expect(iterator_to_array((new CsrfExemptionCheck)->run($ctx)))->toBeEmpty();
+});
+
+// SS010: an empty key in a committed template is fine, a real one is not
+it('flags a real APP_KEY committed to a repository', function () {
+    $base = sys_get_temp_dir().'/analyser-'.bin2hex(random_bytes(6));
+    mkdir($base);
+    file_put_contents("$base/.env.production", 'APP_KEY=base64:'.base64_encode(random_bytes(32)));
+    file_put_contents("$base/.env", 'APP_KEY=');
+
+    $findings = iterator_to_array((new AppKeyCheck)->run(new Context($base, ['source' => 'repository'])), false);
+
+    expect($findings)->toHaveCount(1);
+    expect($findings[0]->file)->toBe('.env.production');
 });

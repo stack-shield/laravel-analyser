@@ -2,6 +2,7 @@
 
 namespace StackShield\Analyser\Checks\Dependencies;
 
+use Composer\Semver\Semver;
 use StackShield\Analyser\Checks\Check;
 use StackShield\Analyser\Context;
 use StackShield\Analyser\Enums\Category;
@@ -10,11 +11,9 @@ use StackShield\Analyser\Finding;
 
 class KnownAdvisoriesCheck implements Check
 {
-    private const CACHE_DIR = '.stackshield/cache';
+    private const CACHE_TTL = 86400;
 
-    private const CACHE_FILE = 'advisories.json';
-
-    private const CACHE_TTL = 604800; // 7 days
+    private const API = 'https://packagist.org/api/security-advisories/';
 
     public function id(): string
     {
@@ -38,180 +37,127 @@ class KnownAdvisoriesCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
+    /**
+     * Installed versions from composer.lock against Packagist's advisory
+     * database, the same source composer audit uses. Advisories in
+     * require-dev packages are advisory: they do not ship to production.
+     */
     public function run(Context $ctx): iterable
     {
-        $lock = $ctx->composerLock();
-        if (empty($lock)) {
+        if ($ctx->config()['offline'] ?? false) {
             return;
         }
 
-        $packages = array_merge(
-            $lock['packages'] ?? [],
-            $lock['packages-dev'] ?? []
-        );
+        $lock = $ctx->composerLock();
+        $installed = [];
+        foreach (['packages' => false, 'packages-dev' => true] as $section => $dev) {
+            foreach ($lock[$section] ?? [] as $package) {
+                $name = $package['name'] ?? '';
+                $version = ltrim($package['version'] ?? '', 'v');
+                // Branch checkouts (dev-main) have no version to compare.
+                if ($name !== '' && $version !== '' && ! str_starts_with($version, 'dev-')) {
+                    $installed[$name] = ['version' => $version, 'dev' => $dev];
+                }
+            }
+        }
 
-        if (empty($packages)) {
+        if ($installed === []) {
             return;
         }
 
-        $advisories = $this->loadAdvisories($ctx);
+        $advisories = $this->advisories(array_keys($installed), $ctx->config()['advisory_cache_dir'] ?? null);
 
-        foreach ($packages as $package) {
-            $name = $package['name'] ?? '';
-            $version = $package['version'] ?? '';
-
-            if (! $name || ! $version) {
-                continue;
-            }
-
-            $packageAdvisories = $advisories[$name] ?? [];
-
-            foreach ($packageAdvisories as $advisory) {
-                if ($this->isAffected($version, $advisory)) {
-                    $ghsaId = $advisory['ghsa_id'] ?? $advisory['id'] ?? 'unknown';
-                    $title = $advisory['title'] ?? 'Security advisory';
-                    $severityStr = strtolower($advisory['severity'] ?? 'high');
-                    $fixedVersion = $advisory['patched_versions'] ?? $advisory['fixed_version'] ?? 'unknown';
-
-                    $severity = match ($severityStr) {
-                        'critical' => Severity::Critical,
-                        'high' => Severity::High,
-                        'moderate', 'medium' => Severity::Medium,
-                        'low' => Severity::Low,
-                        default => Severity::High,
-                    };
-
-                    yield new Finding(
-                        checkId: $this->id(),
-                        checkName: $this->name(),
-                        checkVersion: $this->version(),
-                        severity: $severity,
-                        category: $this->category(),
-                        message: "Package {$name}@{$version} has a known vulnerability: {$title} ({$ghsaId})",
-                        file: 'composer.lock',
-                        symbol: $name,
-                        snippet: "\"{$name}\": \"{$version}\"",
-                        remediation: is_string($fixedVersion)
-                            ? "Update to {$fixedVersion}: composer update {$name}"
-                            : "Run composer update {$name} to get the latest patched version.",
-                    );
+        foreach ($installed as $name => ['version' => $version, 'dev' => $dev]) {
+            foreach ($advisories[$name] ?? [] as $advisory) {
+                if (! $this->isAffected($version, $advisory['affectedVersions'] ?? '')) {
+                    continue;
                 }
+
+                $id = $advisory['cve'] ?? $advisory['advisoryId'] ?? 'unknown';
+                $title = $advisory['title'] ?? 'Security advisory';
+
+                yield new Finding(
+                    checkId: $this->id(),
+                    checkName: $this->name(),
+                    checkVersion: $this->version(),
+                    severity: $this->mapSeverity($advisory['severity'] ?? null),
+                    category: $this->category(),
+                    message: "{$name} {$version} is affected by a known vulnerability: {$title} ({$id}).".($dev ? ' It is a development dependency, so it does not ship to production.' : ''),
+                    file: 'composer.lock',
+                    symbol: $name,
+                    snippet: "\"{$name}\": \"{$version}\"",
+                    remediation: "Update {$name} to a version outside {$advisory['affectedVersions']}: composer update {$name}",
+                    advisory: $dev,
+                );
             }
         }
     }
 
-    private function loadAdvisories(Context $ctx): array
+    /**
+     * Packagist rates many older advisories with no severity. Unrated is
+     * graded as medium rather than assumed high.
+     */
+    private function mapSeverity(?string $severity): Severity
     {
-        $cacheDir = $ctx->resolve(self::CACHE_DIR);
-        $cachePath = $cacheDir.'/'.self::CACHE_FILE;
-
-        if (file_exists($cachePath) && (time() - filemtime($cachePath)) < self::CACHE_TTL) {
-            $data = json_decode(file_get_contents($cachePath), true);
-            if (is_array($data)) {
-                return $data;
-            }
-        }
-
-        // Fetch from Packagist security advisories API (no auth needed)
-        $advisories = $this->fetchAdvisories($ctx);
-
-        if (! empty($advisories)) {
-            if (! is_dir($cacheDir)) {
-                mkdir($cacheDir, 0755, true);
-            }
-            file_put_contents($cachePath, json_encode($advisories));
-        }
-
-        return $advisories;
+        return match (strtolower((string) $severity)) {
+            'critical' => Severity::Critical,
+            'high' => Severity::High,
+            'low' => Severity::Low,
+            default => Severity::Medium,
+        };
     }
 
-    private function fetchAdvisories(Context $ctx): array
+    private function isAffected(string $version, string $affectedVersions): bool
     {
-        $lock = $ctx->composerLock();
-        $packages = array_merge(
-            $lock['packages'] ?? [],
-            $lock['packages-dev'] ?? []
-        );
-
-        $packageNames = array_map(fn ($p) => $p['name'] ?? '', $packages);
-        $packageNames = array_filter($packageNames);
-
-        if (empty($packageNames)) {
-            return [];
-        }
-
-        // Use Packagist security advisories API
-        $url = 'https://packagist.org/api/security-advisories/?packages='.implode('&packages=', array_map('urlencode', $packageNames));
-
-        $context = stream_context_create([
-            'http' => [
-                'timeout' => 30,
-                'header' => 'User-Agent: stackshield-scanner/1.0',
-            ],
-        ]);
-
-        $response = @file_get_contents($url, false, $context);
-        if ($response === false) {
-            return [];
-        }
-
-        $data = json_decode($response, true);
-
-        return $data['advisories'] ?? [];
-    }
-
-    private function isAffected(string $version, array $advisory): bool
-    {
-        // Simple version range check
-        $affectedVersions = $advisory['affected_versions'] ?? $advisory['affectedVersions'] ?? '';
-
-        if (empty($affectedVersions)) {
-            return true; // If no range specified, assume affected
-        }
-
-        // Normalize version
-        $version = ltrim($version, 'v');
-
-        // Try simple constraint matching
-        if (is_string($affectedVersions)) {
-            $constraints = explode('|', $affectedVersions);
-            foreach ($constraints as $constraint) {
-                $constraint = trim($constraint);
-                if ($this->matchesConstraint($version, $constraint)) {
-                    return true;
-                }
-            }
-
+        if ($affectedVersions === '') {
             return false;
         }
 
-        return true;
+        try {
+            return Semver::satisfies($version, $affectedVersions);
+        } catch (\UnexpectedValueException) {
+            return false;
+        }
     }
 
-    private function matchesConstraint(string $version, string $constraint): bool
+    /**
+     * @param  string[]  $packages
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    private function advisories(array $packages, ?string $cacheDir): array
     {
-        // Handle simple constraints like >=1.0,<2.0
-        $parts = preg_split('/\s*,\s*/', $constraint);
+        sort($packages);
+        $cacheDir ??= sys_get_temp_dir().'/stackshield-analyser';
+        $cachePath = $cacheDir.'/advisories-'.sha1(implode(',', $packages)).'.json';
 
-        foreach ($parts as $part) {
-            $part = trim($part);
-            if (empty($part)) {
-                continue;
-            }
-
-            if (preg_match('/^([<>=!]+)\s*(.+)$/', $part, $matches)) {
-                $operator = $matches[1];
-                $constraintVersion = ltrim($matches[2], 'v');
-
-                if (! version_compare($version, $constraintVersion, $operator)) {
-                    return false;
-                }
+        if (is_file($cachePath) && time() - filemtime($cachePath) < self::CACHE_TTL) {
+            $cached = json_decode((string) file_get_contents($cachePath), true);
+            if (is_array($cached)) {
+                return $cached;
             }
         }
 
-        return true;
+        $body = implode('&', array_map(fn ($p) => 'packages[]='.urlencode($p), $packages));
+        $response = @file_get_contents(self::API, false, stream_context_create(['http' => [
+            'method' => 'POST',
+            'timeout' => 30,
+            'header' => "Content-Type: application/x-www-form-urlencoded\r\nUser-Agent: stackshield-laravel-analyser",
+            'content' => $body,
+        ]]));
+
+        $advisories = json_decode((string) $response, true)['advisories'] ?? null;
+        if (! is_array($advisories)) {
+            return [];
+        }
+
+        if (! is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0755, true);
+        }
+        @file_put_contents($cachePath, json_encode($advisories));
+
+        return $advisories;
     }
 }

@@ -2,13 +2,14 @@
 
 namespace StackShield\Analyser\Checks\Code;
 
+use StackShield\Analyser\Checks\Advisory;
 use StackShield\Analyser\Checks\Check;
 use StackShield\Analyser\Context;
 use StackShield\Analyser\Enums\Category;
 use StackShield\Analyser\Enums\Severity;
 use StackShield\Analyser\Finding;
 
-class MassDeleteCheck implements Check
+class MassDeleteCheck implements Advisory, Check
 {
     private const DANGEROUS_PATTERNS = [
         '/\b\w+::truncate\s*\(\s*\)/' => 'Model::truncate() will delete all rows from the table without any conditions',

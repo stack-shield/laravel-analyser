@@ -37,6 +37,11 @@ class PermissionsCheck implements Check
 
     public function run(Context $ctx): iterable
     {
+        // A downloaded repository's file modes say nothing about the server.
+        if (($ctx->config()['source'] ?? 'local') === 'repository') {
+            return;
+        }
+
         $sensitiveFiles = ['.env', 'config/database.php', 'config/app.php', 'storage/logs'];
 
         foreach ($sensitiveFiles as $file) {

@@ -10,9 +10,13 @@ use StackShield\Analyser\Finding;
 
 class InsecureRandomCheck implements Check
 {
-    private const INSECURE_FUNCTIONS = ['rand', 'mt_rand', 'array_rand'];
-
-    private const SENSITIVE_KEYWORDS = ['token', 'password', 'reset', 'otp', 'secret', 'verify'];
+    /**
+     * The random value has to land in something secret-shaped on the same
+     * statement: $token = mt_rand(...), 'otp' => rand(...). A file merely
+     * mentioning "token" is not enough; retry jitter, seeders and demo data
+     * use rand() legitimately.
+     */
+    private const SENSITIVE_TARGET = '/(?:\$|[\'"])\w*(?:token|password|passwd|otp|secret|nonce|salt|pin|code|key)\w*[\'"]?\s*(?:=>|=(?!=))[^;]*?\b(?<func>mt_rand|rand)\s*\(/i';
 
     public function id(): string
     {
@@ -36,7 +40,7 @@ class InsecureRandomCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -47,47 +51,31 @@ class InsecureRandomCheck implements Check
                 continue;
             }
 
-            // Check if the file/context is security-sensitive
-            $lowerContents = strtolower($contents);
-            $isSensitiveFile = false;
-            foreach (self::SENSITIVE_KEYWORDS as $keyword) {
-                if (str_contains($lowerContents, $keyword)) {
-                    $isSensitiveFile = true;
-                    break;
-                }
-            }
-
-            if (! $isSensitiveFile) {
-                continue;
-            }
-
-            $lines = explode("\n", $contents);
-
-            foreach ($lines as $lineNum => $line) {
+            foreach (explode("\n", $contents) as $lineNum => $line) {
                 $trimmed = trim($line);
                 if (str_starts_with($trimmed, '//') || str_starts_with($trimmed, '#') || str_starts_with($trimmed, '*')) {
                     continue;
                 }
 
-                foreach (self::INSECURE_FUNCTIONS as $func) {
-                    if (preg_match('/\b' . preg_quote($func, '/') . '\s*\(/', $line)) {
-                        yield new Finding(
-                            checkId: $this->id(),
-                            checkName: $this->name(),
-                            checkVersion: $this->version(),
-                            severity: $this->severity(),
-                            category: $this->category(),
-                            message: "Use of {$func}() in a security-sensitive context. This function does not produce cryptographically secure random values.",
-                            file: $file,
-                            line: $lineNum + 1,
-                            symbol: $func,
-                            snippet: trim($line),
-                            remediation: 'Use random_int() or Str::random() for generating tokens, passwords, OTPs, or other security-sensitive random values.',
-                        );
-
-                        break; // One finding per line
-                    }
+                if (! preg_match(self::SENSITIVE_TARGET, $line, $match)) {
+                    continue;
                 }
+
+                $func = $match['func'];
+
+                yield new Finding(
+                    checkId: $this->id(),
+                    checkName: $this->name(),
+                    checkVersion: $this->version(),
+                    severity: $this->severity(),
+                    category: $this->category(),
+                    message: "{$func}() generates what looks like a secret value. It is not cryptographically secure, so the value can be predicted.",
+                    file: $file,
+                    line: $lineNum + 1,
+                    symbol: $func,
+                    snippet: $trimmed,
+                    remediation: 'Use random_int() or Str::random() for generating tokens, passwords, OTPs, or other security-sensitive random values.',
+                );
             }
         }
     }

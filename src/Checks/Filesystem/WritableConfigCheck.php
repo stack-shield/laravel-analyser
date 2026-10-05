@@ -37,6 +37,11 @@ class WritableConfigCheck implements Check
 
     public function run(Context $ctx): iterable
     {
+        // A downloaded repository's file modes say nothing about the server.
+        if (($ctx->config()['source'] ?? 'local') === 'repository') {
+            return;
+        }
+
         $configDir = $ctx->resolve('config');
         if (! is_dir($configDir)) {
             return;

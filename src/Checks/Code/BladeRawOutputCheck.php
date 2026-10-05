@@ -13,8 +13,16 @@ use StackShield\Analyser\Finding;
 
 class BladeRawOutputCheck implements Check
 {
+    /** Request data rendered raw: graded. */
+    private const REQUEST_SOURCES = [
+        '$request', 'request(', 'Request::', 'old(', '$_GET', '$_POST', '$_REQUEST', '$_COOKIE',
+    ];
+
+    /**
+     * Names that often hold user content, but whose source static analysis
+     * cannot see: reported as advisory, not graded.
+     */
     private const SUSPICIOUS_VARIABLES = [
-        '$request', 'request(', '$_GET', '$_POST', '$_REQUEST',
         '$input', '$query', '$name', '$title', '$body',
         '$content', '$message', '$comment', '$description',
     ];
@@ -41,7 +49,7 @@ class BladeRawOutputCheck implements Check
 
     public function version(): int
     {
-        return 1;
+        return 2;
     }
 
     public function run(Context $ctx): iterable
@@ -77,26 +85,62 @@ class BladeRawOutputCheck implements Check
 
                 $expression = $matches[1];
 
-                // Check if the expression contains potentially user-controllable data
-                foreach (self::SUSPICIOUS_VARIABLES as $var) {
-                    if (str_contains($expression, $var)) {
-                        yield new Finding(
-                            checkId: $this->id(),
-                            checkName: $this->name(),
-                            checkVersion: $this->version(),
-                            severity: $this->severity(),
-                            category: $this->category(),
-                            message: "Blade raw output {!! !!} may render user-controllable data without escaping, leading to XSS vulnerabilities.",
-                            file: $file,
-                            line: $lineNum + 1,
-                            snippet: trim($line),
-                            remediation: 'Use {{ }} for escaped output instead of {!! !!}. If raw HTML is required, sanitize the data first with e() or a library like HTMLPurifier.',
-                        );
-
-                        break; // One finding per line
-                    }
+                if ($this->rendersOnlyLiterals($expression)) {
+                    continue;
                 }
+
+                // request()->user() is the authenticated model, not input.
+                $inputs = preg_replace('/(?:request\(\)|\$request|Request::)\s*(?:->|::)?user\(\)/', '', $expression);
+                $fromRequest = $this->containsAny($inputs, self::REQUEST_SOURCES);
+                if (! $fromRequest && ! $this->containsAny($expression, self::SUSPICIOUS_VARIABLES)) {
+                    continue;
+                }
+
+                yield new Finding(
+                    checkId: $this->id(),
+                    checkName: $this->name(),
+                    checkVersion: $this->version(),
+                    severity: $this->severity(),
+                    category: $this->category(),
+                    message: $fromRequest
+                        ? 'Request data is rendered with Blade raw output {!! !!}, without escaping. This is a cross-site scripting (XSS) vulnerability.'
+                        : 'Blade raw output {!! !!} renders a variable that may hold user content. If it does, this is a cross-site scripting (XSS) risk.',
+                    file: $file,
+                    line: $lineNum + 1,
+                    snippet: trim($line),
+                    remediation: 'Use {{ }} for escaped output instead of {!! !!}. If raw HTML is required, sanitize the data first with e() or a library like HTMLPurifier.',
+                    advisory: ! $fromRequest,
+                );
             }
         }
+    }
+
+    /**
+     * Expressions that cannot output unescaped input: a ternary choosing
+     * between string literals (request()->is('x*') ? ' class="active"' : ''),
+     * or a helper that escapes what it renders.
+     */
+    private function rendersOnlyLiterals(string $expression): bool
+    {
+        $literal = '(?:\'[^\']*\'|"[^"]*")';
+        if (preg_match('/\?\s*'.$literal.'\s*:\s*'.$literal.'\s*\)?\s*$/', $expression)) {
+            return true;
+        }
+
+        // Paginator markup, Fortify's QR code, and form builders (Laravel
+        // Collective, spatie/laravel-html), which escape the values they render.
+        return (bool) preg_match('/->(?:links|render|appends)\(|QrCodeSvg\(\)|^\s*(?:Form|Html|html\(\))\s*(?:::|->)/', $expression);
+    }
+
+    /** @param string[] $needles */
+    private function containsAny(string $haystack, array $needles): bool
+    {
+        foreach ($needles as $needle) {
+            if (str_contains($haystack, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

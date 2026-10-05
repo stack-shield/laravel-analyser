@@ -2,13 +2,14 @@
 
 namespace StackShield\Analyser\Checks\Config;
 
+use StackShield\Analyser\Checks\Advisory;
 use StackShield\Analyser\Checks\Check;
 use StackShield\Analyser\Context;
 use StackShield\Analyser\Enums\Category;
 use StackShield\Analyser\Enums\Severity;
 use StackShield\Analyser\Finding;
 
-class TrustedProxiesCheck implements Check
+class TrustedProxiesCheck implements Advisory, Check
 {
     public function id(): string
     {

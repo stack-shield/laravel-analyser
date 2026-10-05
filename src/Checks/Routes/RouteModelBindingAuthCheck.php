@@ -4,13 +4,14 @@ namespace StackShield\Analyser\Checks\Routes;
 
 use PhpParser\Node;
 use PhpParser\NodeFinder;
+use StackShield\Analyser\Checks\Advisory;
 use StackShield\Analyser\Checks\Check;
 use StackShield\Analyser\Context;
 use StackShield\Analyser\Enums\Category;
 use StackShield\Analyser\Enums\Severity;
 use StackShield\Analyser\Finding;
 
-class RouteModelBindingAuthCheck implements Check
+class RouteModelBindingAuthCheck implements Advisory, Check
 {
     private const USER_SCOPED_PATTERNS = [
         '{user}', '{account}', '{profile}', '{order}', '{invoice}',

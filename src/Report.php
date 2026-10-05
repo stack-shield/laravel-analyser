@@ -13,6 +13,9 @@ final class Report
 
     private ?float $endTime = null;
 
+    /** @var string[] */
+    private array $unparseableFiles = [];
+
     public function __construct(
         public readonly string $scannerVersion,
         public readonly string $basePath,
@@ -30,6 +33,18 @@ final class Report
         foreach ($findings as $finding) {
             $this->addFinding($finding);
         }
+    }
+
+    /** @param string[] $files */
+    public function setUnparseableFiles(array $files): void
+    {
+        $this->unparseableFiles = $files;
+    }
+
+    /** @return string[] */
+    public function unparseableFiles(): array
+    {
+        return $this->unparseableFiles;
     }
 
     public function finish(): void
@@ -54,11 +69,35 @@ final class Report
         return count($this->findings);
     }
 
+    /** @return Finding[] Findings that count toward the grade. */
+    public function gradedFindings(): array
+    {
+        return array_values(array_filter($this->findings, fn (Finding $f) => ! $f->advisory));
+    }
+
+    /** @return Finding[] */
+    public function advisoryFindings(): array
+    {
+        return array_values(array_filter($this->findings, fn (Finding $f) => $f->advisory));
+    }
+
+    /** Counts of graded findings by severity. Advisory findings are excluded. */
     public function countBySeverity(): array
+    {
+        return $this->tally($this->gradedFindings());
+    }
+
+    public function advisoryCountBySeverity(): array
+    {
+        return $this->tally($this->advisoryFindings());
+    }
+
+    /** @param Finding[] $findings */
+    private function tally(array $findings): array
     {
         $counts = [];
         foreach (Severity::cases() as $severity) {
-            $counts[$severity->value] = count($this->findingsBySeverity($severity));
+            $counts[$severity->value] = count(array_filter($findings, fn (Finding $f) => $f->severity === $severity));
         }
 
         return $counts;
@@ -97,7 +136,9 @@ final class Report
             'grade' => $this->grade(),
             'duration' => round($this->duration(), 3),
             'finding_counts' => $this->countBySeverity(),
+            'advisory_counts' => $this->advisoryCountBySeverity(),
             'total_findings' => $this->count(),
+            'unparseable_files' => $this->unparseableFiles,
             'findings' => array_map(fn (Finding $f) => $f->toArray(), $this->findings),
         ];
     }
