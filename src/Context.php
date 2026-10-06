@@ -18,8 +18,16 @@ final class Context
 
     private Parser $parser;
 
-    /** @var array<string, Node\Stmt[]> */
+    /**
+     * Parsed files, most recently used last. Bounded: a syntax tree takes
+     * tens of times the memory of its source, so keeping every file of a
+     * large application ran scans out of memory.
+     *
+     * @var array<string, Node\Stmt[]>
+     */
     private array $astCache = [];
+
+    private const AST_CACHE_SIZE = 100;
 
     private ?array $envCache = null;
 
@@ -48,7 +56,15 @@ final class Context
         $absolutePath = $this->resolve($file);
 
         if (isset($this->astCache[$absolutePath])) {
-            return $this->astCache[$absolutePath];
+            $stmts = $this->astCache[$absolutePath];
+            // Move to the end so the least recently used file is evicted first.
+            unset($this->astCache[$absolutePath]);
+
+            return $this->astCache[$absolutePath] = $stmts;
+        }
+
+        if (count($this->astCache) >= self::AST_CACHE_SIZE) {
+            unset($this->astCache[array_key_first($this->astCache)]);
         }
 
         if (! file_exists($absolutePath)) {
